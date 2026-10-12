@@ -10,23 +10,15 @@ near the car. No custom ESPHome vehicle component is required.
 ## What you get
 
 - **Vehicle data:** battery, range, charging, temperatures, tire pressures,
-  odometer, doors, locks, and sleep state.
+  odometer, doors, locks, sleep state, estimated AC Energy, and battery Energy added.
 - **Controls:** locks, charging, charge limit/current, climate, fitted seat
   heating/cooling, trunk/frunk, charge port, windows, lights, and horn.
 - **Bluetooth presence:** know when the car is nearby—not GPS tracking.
+- **Auto-discovery:** nearby cars appear in HA, ready to add and pair.
 - **Sleep-friendly polling:** automatic updates do not deliberately wake the car.
 
 Optional controls appear after the vehicle reports support. Not every vehicle
 supports every feature.
-
-> **Energy sensors:** **Energy** accumulates AC (wall-side) charging energy from
-> the car's own voltage/current/phase readings — no wall connector or meter
-> required. It is an estimate: polling gaps are only partly counted. **Energy
-> added** accumulates the car's charging-session meter (battery side); downward
-> revisions of an ended session are ignored, and a new session counts only when
-> it restarts below 90% of the previous reading. Sessions that start and end
-> unseen cannot be reconstructed, and earlier totals may still include past
-> over-counting; history is not rewritten.
 
 ## Requirements
 
@@ -71,8 +63,13 @@ PyPI. On supported platforms, no compilation is needed.
 
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start?domain=tesla_ble)
 
-1. Open **Settings → Devices & Services → Add Integration → Tesla BLE**.
-2. Select the discovered car and enter its **VIN**. If it is not discovered,
+Nearby cars are **automatically discovered** under **Settings → Devices & Services**.
+
+<img src="docs/ha-discovery.png" alt="Automatically discovered Tesla BLE vehicle with an Add button" width="480">
+
+1. Click **Add** on the discovered Tesla BLE card, or choose
+   **Add Integration → Tesla BLE** manually.
+2. Select the car and enter its **VIN**. If it is not discovered,
    enter its Bluetooth address manually; find it in Bluetooth's
    **Advertisement monitor**.
 3. When prompted, tap a **key card on the car's center-console reader**.
@@ -84,6 +81,8 @@ it to retry. Add the integration separately for each vehicle.
 ## Daily use
 
 Open the Tesla BLE device page to find its sensors and controls.
+
+<img src="docs/ha-controls.png" alt="Tesla BLE device page showing battery level, diagnostics, climate and charging controls" width="420">
 
 | Task | Entity or setting |
 | --- | --- |

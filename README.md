@@ -179,6 +179,16 @@ Offline tests cover transport, commands/entities, recovery, pairing, credential
 storage, and lifecycle behavior—not radio timing or physical vehicle controls.
 Strict mypy covers transport, storage adapters, and constants.
 
+### Releases
+
+Run **Actions → Release → Run workflow** from `main`. Choose patch/minor/major,
+or enter an explicit `X.Y.Z`. It updates the manifest through a PR, waits for
+checks, squash-merges, then publishes the GitHub release with generated notes.
+
+One-time setup: add a repository secret named `RELEASE_TOKEN` for this repository
+(Contents and Pull requests: write; Actions and Checks: read). No environment
+approval or branch-rule bypass is needed.
+
 ### Standalone vehicle CLI
 
 Without HA, use Python 3.13+ with Bluetooth on a supported native-wheel platform:

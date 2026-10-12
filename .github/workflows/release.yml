@@ -27,6 +27,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 30
     steps:
       - name: Require main and release token
@@ -38,7 +39,7 @@ jobs:
             exit 1
           fi
           if [ -z "$RELEASE_TOKEN" ]; then
-            echo "Set the repository secret RELEASE_TOKEN" >&2
+            echo "Set RELEASE_TOKEN in the release environment" >&2
             exit 1
           fi
 
@@ -48,7 +49,19 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
 
-      - name: Bump, validate, merge and publish
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.14"
+
+      - name: Validate
+        run: |
+          uv sync --locked
+          uv run --no-sync ruff check custom_components tests scripts
+          uv run --no-sync ruff format --check custom_components tests scripts
+          uv run --no-sync mypy
+          uv run --no-sync pytest tests -q
+
+      - name: Bump and publish
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           INPUT_BUMP: ${{ inputs.bump }}

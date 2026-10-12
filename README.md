@@ -187,11 +187,11 @@ and PR titles: `type(optional-scope): description`. Use `feat`, `fix`, `docs`,
 ### Releases
 
 Run **Actions → Release → Run workflow** from `main`. Choose patch/minor/major,
-or enter an explicit `X.Y.Z`. It updates the manifest through a PR, waits for
-checks, squash-merges, then publishes the GitHub release with generated notes.
+or enter an explicit `X.Y.Z`. It runs checks, bumps the manifest, and publishes
+a GitHub release with generated notes. Re-run a failed workflow to resume.
 
-One-time setup: add a repository secret named `RELEASE_TOKEN` for this repository
-(Contents and Pull requests: write; Actions and Checks: read).
+Setup: `RELEASE_TOKEN` in the `release` environment, with Contents: read/write
+and Metadata: read, owned by an administrator allowed to bypass the `main` rules.
 
 ### Standalone vehicle CLI
 

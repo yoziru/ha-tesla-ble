@@ -118,7 +118,7 @@
         "name": "Flash lights"
       },
       "force_update": {
-        "name": "Refresh vehicle data"
+        "name": "Force refresh vehicle data"
       },
       "honk_horn": {
         "name": "Honk horn"

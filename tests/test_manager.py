@@ -233,16 +233,31 @@ async def test_pair_button_persists_key(hass: HomeAssistant, sim, monkeypatch, h
     assert manager._store.load("private_key") is not None
 
 
-async def test_force_update_button(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+@pytest.mark.parametrize("sleeping", [False, True])
+async def test_force_update_button(
+    hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth, sleeping
+) -> None:
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     manager._next_vcsec_poll = 0
-    await settle_until(hass, lambda: bool(manager.charge_state))
+    await settle_until(hass, lambda: bool(manager.charge_state) and manager._vehicle.pending_command_count == 0)
+    await manager.async_set_polling(False)
+    if sleeping:
+        sim.set_sleeping(True)
+        manager._vehicle.vcsec_poll()
+        await manager._transport.async_flush()
+        await settle_until(
+            hass, lambda: manager.vehicle_status.get("asleep") and manager._vehicle.pending_command_count == 0
+        )
     sim.set_battery_level(61)
+    sim.set_software_update_state(4)
 
     button_id = er.async_get(hass).async_get_entity_id("button", DOMAIN, f"{VIN}_button_force_update")
     await hass.services.async_call("button", "press", {"entity_id": button_id}, blocking=True)
-    await settle_until(hass, lambda: manager.charge_state.get("battery_level") == 61)
+    await settle_until(
+        hass,
+        lambda: manager.charge_state.get("battery_level") == 61 and manager.software_update_state.get("status") == 4,
+    )
 
     assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "61"
 
@@ -890,7 +905,8 @@ async def test_automatic_poll_does_not_wake_car_with_stale_awake_telemetry(hass,
     await settle_until(hass, lambda: bool(manager.charge_state) and manager._vehicle.pending_command_count == 0)
     await manager.async_set_polling(False)
     sim.set_sleeping(True)
-    await manager.async_force_update()
+    manager._vehicle.vcsec_poll()
+    await manager._transport.async_flush()
     await settle_until(
         hass, lambda: manager.vehicle_status.get("asleep") and manager._vehicle.pending_command_count == 0
     )
@@ -902,7 +918,8 @@ async def test_automatic_poll_does_not_wake_car_with_stale_awake_telemetry(hass,
     await manager._async_handle_polls()
     manager.polling = False
     await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
-    await manager.async_force_update()
+    manager._vehicle.vcsec_poll()
+    await manager._transport.async_flush()
     await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
     assert manager.vehicle_status["asleep"] is True
 

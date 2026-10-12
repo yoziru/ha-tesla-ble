@@ -717,8 +717,8 @@ class TeslaBLEManager:
             await self._async_ensure_connected()
             self._last_activity = time.monotonic()
             self._vehicle.vcsec_poll()
-            self._vehicle.infotainment_poll(tesla_ble.WakePolicy.NO_WAKE_SKIP)
-            self._vehicle.software_update_poll(tesla_ble.WakePolicy.NO_WAKE_SKIP)
+            self._vehicle.infotainment_poll(tesla_ble.WakePolicy.WAKE_IF_NEEDED)
+            self._vehicle.software_update_poll(tesla_ble.WakePolicy.WAKE_IF_NEEDED)
             self._poll_policy.on_poll(monotonic_ms())
             await self._transport.async_flush()
 

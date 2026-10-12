@@ -86,7 +86,7 @@ Open the Tesla BLE device page to find its sensors and controls.
 
 | Task | Entity or setting |
 | --- | --- |
-| Fetch data without waking the car | **Refresh vehicle data** |
+| Fetch fresh data, waking the car if needed | **Force refresh vehicle data** |
 | Wake a sleeping car | **Wake up** |
 | Pause automatic updates | **Polling** switch |
 | Change polling intervals | Integration **Options** |
@@ -96,8 +96,8 @@ Open the Tesla BLE device page to find its sensors and controls.
 
 ### Sleep and availability
 
-Automatic polling and manual refresh do not send wake commands. Explicit
-controls can wake the car. A sleeping car may show **cached data**, not current
+Automatic polling does not send wake commands. **Force refresh vehicle data**
+and explicit controls can wake the car. A sleeping car may show **cached data**, not current
 measurements. When it leaves Bluetooth range, telemetry becomes unavailable
 after about two minutes; **Location** changes to `not_home`.
 
@@ -107,7 +107,7 @@ charging/sentry data every **10 seconds**, and idle/asleep data every
 can still affect sleep and battery use.
 
 Use the **Polling** switch to pause updates—not HA's generic **Enable polling
-for changes** option. Manual refresh and controls still work while paused.
+for changes** option. Force refresh and controls still work while paused.
 
 ### Useful limitations
 
@@ -141,7 +141,7 @@ revokes the old key in the car; remove it from the vehicle's key list yourself.
 | Car not discovered | Bluetooth Advertisement monitor, proxy range, active connections, and supported vehicle. Discovery requires about 30 seconds of advertising. |
 | Pairing fails | Keep the car reachable, retry **Pair vehicle**, and tap the card when prompted. Check notifications and **Last command**. |
 | Commands time out | Bluetooth range and free connection slots. Close competing phone/watch apps where practical; use **Wake up** to check recovery. |
-| Sleeping car's data does not refresh | Expected: **Refresh vehicle data** does not wake it. Use **Wake up** when you need fresh data. |
+| Sleeping car's data does not refresh | Automatic polling does not wake it. Use **Force refresh vehicle data** to wake and fetch fresh data. |
 | Dependency installation fails | Check HA version, CPU/platform, internet access, and the package-install error in HA logs. |
 | Energy total jumps | Older versions counted the car's downward session revisions as new energy. Update the integration; existing totals are not rewritten. |
 

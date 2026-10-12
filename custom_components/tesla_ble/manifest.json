@@ -35,5 +35,5 @@
   "requirements": [
     "tesla-ble==6.0.2"
   ],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }

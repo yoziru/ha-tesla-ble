@@ -76,7 +76,7 @@ def main() -> None:
     manifest["version"] = version
     MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
     run("git", "add", str(MANIFEST))
-    run("git", "commit", "-m", f"release: {tag}")
+    run("git", "commit", "-m", f"chore(release): {tag}")
     run("git", "push", "-u", "origin", branch)
     pr = run(
         "gh",
@@ -87,7 +87,7 @@ def main() -> None:
         "--head",
         branch,
         "--title",
-        f"release: {tag}",
+        f"chore(release): {tag}",
         "--body",
         "Version-only bump. The Release workflow publishes after validation and squash merge.",
     )

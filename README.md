@@ -179,6 +179,11 @@ Offline tests cover transport, commands/entities, recovery, pairing, credential
 storage, and lifecycle behavior—not radio timing or physical vehicle controls.
 Strict mypy covers transport, storage adapters, and constants.
 
+Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages
+and PR titles: `type(optional-scope): description`. Use `feat`, `fix`, `docs`,
+`test`, `refactor`, `chore`, or `ci`; add a scope when useful, such as
+`fix(ble): recover disconnected sessions`. Mark breaking changes with `!`.
+
 ### Releases
 
 Run **Actions → Release → Run workflow** from `main`. Choose patch/minor/major,
@@ -186,8 +191,7 @@ or enter an explicit `X.Y.Z`. It updates the manifest through a PR, waits for
 checks, squash-merges, then publishes the GitHub release with generated notes.
 
 One-time setup: add a repository secret named `RELEASE_TOKEN` for this repository
-(Contents and Pull requests: write; Actions and Checks: read). No environment
-approval or branch-rule bypass is needed.
+(Contents and Pull requests: write; Actions and Checks: read).
 
 ### Standalone vehicle CLI
 

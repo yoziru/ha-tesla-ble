@@ -97,9 +97,9 @@ Restricted modes show status instead of lock/cover controls and cannot install
 or cancel car updates. Pairing, key regeneration and polling remain available.
 
 **Configured key access** shows the recorded role, not a vehicle-verified role.
-Older installations keep their **OWNER** key; new setups never request OWNER.
-Access changes are not yet supported in-place. To change access, remove the old
-key from the car and set up the integration again. Removing the integration
+Older installations predate access levels and are treated as **Vehicle controls**
+(DRIVER); pairing and repair never request OWNER. To change the key's access on
+the car, remove the key from the vehicle and pair again. Removing the integration
 also deletes its local keys and Energy counter; it does not revoke the car's key.
 
 ## Daily use

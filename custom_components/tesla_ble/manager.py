@@ -94,7 +94,7 @@ class TeslaBLEManager:
         # Entries created before role selection enrolled OWNER keys. Treat them
         # as Vehicle controls and never request OWNER again; a re-pair enrolls
         # the entry's role, so legacy entries repair with DRIVER access.
-        self.role: str = entry.data.get(CONF_ROLE, "OWNER")
+        self.role: str = entry.data.get(CONF_ROLE, "DRIVER")
         if self.role not in ROLE_LABELS:
             raise HomeAssistantError(f"Unsupported vehicle key role: {self.role}")
         self.device_name = f"Tesla {self.vin[-6:]}"

@@ -77,11 +77,11 @@ async def test_role_entities_keep_telemetry_and_only_allowed_controls(hass, sim,
             assert float(state_of(hass, "sensor", f"{VIN}_sensor_charging_amps")) == 16
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
-    assert diagnostics["configured_key_role"] == (role or "OWNER")
+    assert diagnostics["configured_key_role"] == (role or "DRIVER")
     assert (
         state_of(hass, "sensor", f"{VIN}_sensor_key_access")
         == {
-            None: "Owner (legacy)",
+            None: "Vehicle controls",
             "DRIVER": "Vehicle controls",
             "CHARGING_MANAGER": "Charging controls",
             "VEHICLE_MONITOR": "Read-only monitoring",

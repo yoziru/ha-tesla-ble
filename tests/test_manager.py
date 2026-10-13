@@ -365,7 +365,7 @@ async def test_setup_pairs_automatically(
     assert state_of(hass, "sensor", f"{VIN}_sensor_last_command") == "Pair: ok"
     assert any("key card" in message for message in notifications)
     assert any("paired" in message.lower() for message in notifications)
-    expected = getattr(tesla_ble.KeysRole, role or "OWNER")
+    expected = getattr(tesla_ble.KeysRole, role or "DRIVER")
     assert requested_roles == [expected]
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
@@ -1273,8 +1273,8 @@ async def test_repair_deleted_vehicle_key_preserves_credentials_and_energy(hass,
     assert manager.energy_total == 12.5 and manager.ac_energy_total == 1.25
 
 
-async def test_reauth_recovers_when_car_pairs_without_status_reply(hass, sim, monkeypatch, hass_storage):
-    """The car accepted the key but never sent a whitelist status reply."""
+async def test_reauth_finds_existing_key_without_new_pairing_request(hass, sim, monkeypatch, hass_storage):
+    """The car already accepts the key, so no whitelist request or key-card tap is needed."""
     entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     await settle_until(hass, lambda: manager.paired and manager._vehicle.pending_command_count == 0)
@@ -1292,7 +1292,11 @@ async def test_reauth_recovers_when_car_pairs_without_status_reply(hass, sim, mo
     result = await hass.config_entries.flow.async_configure(flow_id)
     assert result["step_id"] == "reauth_confirm"
 
+    pair_requests = 0
+
     async def pair_still_pending() -> None:
+        nonlocal pair_requests
+        pair_requests += 1
         manager._pairing_pending = True
         raise HomeAssistantError("Pairing is already waiting for key-card approval")
 
@@ -1306,8 +1310,56 @@ async def test_reauth_recovers_when_car_pairs_without_status_reply(hass, sim, mo
     await asyncio.sleep(0.2)
     result = await hass.config_entries.flow.async_configure(flow_id)
     assert result["type"] == "abort" and result["reason"] == "reauth_successful"
+    assert pair_requests == 0
     assert manager._store.load("paired_key") == manager._key_id()
     assert state_of(hass, "binary_sensor", f"{VIN}_binary_pairing_required") == "off"
+
+
+async def test_reauth_pairs_when_car_never_answers_the_probe(hass, sim, monkeypatch, hass_storage):
+    """An unreachable car gets a pairing request instead of an endless probe."""
+    from custom_components.tesla_ble import ble as ble_module
+    from custom_components.tesla_ble import config_flow as config_flow_module
+
+    monkeypatch.setattr(config_flow_module, "PAIRING_PROBE_TIMEOUT", 0.2)
+    monkeypatch.setattr(config_flow_module, "PAIRING_CONFIRMATION_TIMEOUT", 0.5)
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: manager.paired and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+    manager._next_vcsec_poll = 0.0
+    sim.set_paired(False)
+    await manager._async_disconnect()
+    manager.polling = True
+    await settle_until(hass, lambda: manager._key_rejected and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+
+    async def unreachable(*args, **kwargs):
+        raise HomeAssistantError("test: vehicle not reachable")
+
+    monkeypatch.setattr(ble_module, "establish_connection", unreachable)
+    await manager._async_disconnect()
+
+    flows = [
+        flow for flow in hass.config_entries.flow.async_progress() if flow["context"].get("entry_id") == entry.entry_id
+    ]
+    flow_id = flows[0]["flow_id"]
+    result = await hass.config_entries.flow.async_configure(flow_id)
+    assert result["step_id"] == "reauth_confirm"
+
+    pair_requests = 0
+
+    async def never_answers() -> None:
+        nonlocal pair_requests
+        pair_requests += 1
+        manager._pairing_pending = True
+
+    monkeypatch.setattr(manager, "async_pair", never_answers)
+    result = await hass.config_entries.flow.async_configure(flow_id, {})
+    assert result["step_id"] == "reauth_pair"
+    await asyncio.sleep(1)
+    result = await hass.config_entries.flow.async_configure(flow_id)
+    assert result["step_id"] == "reauth_confirm" and result["errors"] == {"base": "pairing_failed"}
+    assert pair_requests == 1
 
 
 async def test_failed_pair_and_regenerated_key_stay_unpaired_on_reload(hass, sim, monkeypatch, hass_storage):

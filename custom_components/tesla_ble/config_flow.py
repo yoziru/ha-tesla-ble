@@ -64,6 +64,9 @@ DISCOVERY_SETTLE_CHECKS = 3
 # retries for about three minutes), so the repair flow waits for a verified
 # session instead of the car's status reply.
 PAIRING_CONFIRMATION_TIMEOUT = 240
+# Before asking to pair, check whether the car already accepts the existing
+# key; that needs no key-card tap and usually answers within one poll.
+PAIRING_PROBE_TIMEOUT = 30
 
 VIN_SCHEMA = vol.Schema({vol.Required(CONF_VIN): str})
 
@@ -305,20 +308,30 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
         if manager is None:
             return False
         manager.begin_repair()
+        # The car may already accept the existing key; verify before asking the
+        # user to tap a key card again.
+        if await self._async_wait_for_pairing(manager, PAIRING_PROBE_TIMEOUT):
+            manager.end_repair()
+            return True
         with contextlib.suppress(HomeAssistantError):
             await manager.async_pair()
-        # The whitelist request may still be retrying after the car confirmed;
-        # let polling verify whether the key is accepted.
+        # Start a fresh window; the whitelist request may still be retrying
+        # after the car confirmed, so polling verifies whether the key is
+        # accepted instead of trusting the car's status reply.
         manager.begin_repair()
-        deadline = self.hass.loop.time() + PAIRING_CONFIRMATION_TIMEOUT
+        paired = await self._async_wait_for_pairing(manager, PAIRING_CONFIRMATION_TIMEOUT)
+        manager.end_repair()
+        return paired
+
+    async def _async_wait_for_pairing(self, manager: Any, timeout: float) -> bool:
+        """Wait for a verified session; give up early when the car rejects the key."""
+        deadline = self.hass.loop.time() + timeout
         while self.hass.loop.time() < deadline:
             if manager.paired:
-                manager.end_repair()
                 return True
             if manager.repair_rejection_seen and not manager.pairing_command_pending:
-                break
+                return False
             await asyncio.sleep(0.1)
-        manager.end_repair()
         return manager.paired
 
     async def async_step_reauth_pair(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

@@ -91,8 +91,9 @@ class TeslaBLEManager:
         self.entry = entry
         self.vin: str = entry.data[CONF_VIN]
         self.address: str = entry.data[CONF_ADDRESS]
-        # Entries created before role selection enrolled OWNER keys. Do not
-        # relabel or silently replace those vehicle credentials.
+        # Entries created before role selection enrolled OWNER keys. Treat them
+        # as Vehicle controls and never request OWNER again; a re-pair enrolls
+        # the entry's role, so legacy entries repair with DRIVER access.
         self.role: str = entry.data.get(CONF_ROLE, "OWNER")
         if self.role not in ROLE_LABELS:
             raise HomeAssistantError(f"Unsupported vehicle key role: {self.role}")
@@ -448,6 +449,9 @@ class TeslaBLEManager:
         self._repair_rejection_seen = False
         self._key_rejected = False
         self._store.remove("key_rejected")
+        # Pairing must be re-proven by a real session, not a cached marker.
+        self.paired = False
+        self._store.remove("paired_key")
         self._refresh_pending = True
         self._next_vcsec_poll = 0.0
         self._notify()

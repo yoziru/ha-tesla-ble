@@ -884,11 +884,11 @@ async def test_energy_accumulates_observed_sessions_and_survives_reload(hass, si
 
 
 async def test_energy_meter_revisions_are_not_new_sessions(hass, sim, monkeypatch, hass_storage):
-    """The car revised this ended session downward (2026-10-12 data); none of it is new energy."""
+    """Synthetic downward revisions do not represent a new charging session."""
     entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     await manager.async_set_polling(False)
-    for value in (27.18, 27.10, 27.08, 27.04, 26.72, 26.70, 26.62):
+    for value in (10.00, 9.99, 9.97, 9.95, 9.85, 9.83, 9.81):
         manager._on_charge_state({"charge_energy_added": value})
     assert manager.energy_total == 0
     for value in (0.05, 0.4, 1.2):
@@ -1218,7 +1218,7 @@ async def test_repair_deleted_vehicle_key_preserves_credentials_and_energy(hass,
     await settle_until(hass, lambda: manager.paired and manager._vehicle.pending_command_count == 0)
     manager.polling = False
     key = manager._store.load("private_key").rstrip(b"\n\x00")
-    manager.energy_total = 38.42
+    manager.energy_total = 12.5
     manager.ac_energy_total = 1.25
     manager._save_energy()
     manager._save_ac_energy()
@@ -1231,6 +1231,7 @@ async def test_repair_deleted_vehicle_key_preserves_credentials_and_energy(hass,
     assert not manager.paired
     assert state_of(hass, "binary_sensor", f"{VIN}_binary_pairing_required") == "on"
     assert not manager.state_available("charge_state")
+    manager._store.save("paired_key", manager._key_id())
     assert await hass.config_entries.async_reload(entry.entry_id)
     manager = entry.runtime_data
     assert manager._key_rejected and not manager.paired
@@ -1266,7 +1267,7 @@ async def test_repair_deleted_vehicle_key_preserves_credentials_and_energy(hass,
     assert manager.paired and not manager._key_rejected
     assert state_of(hass, "binary_sensor", f"{VIN}_binary_pairing_required") == "off"
     assert manager._store.load("private_key").rstrip(b"\n\x00") == key
-    assert manager.energy_total == 38.42 and manager.ac_energy_total == 1.25
+    assert manager.energy_total == 12.5 and manager.ac_energy_total == 1.25
 
 
 async def test_failed_pair_and_regenerated_key_stay_unpaired_on_reload(hass, sim, monkeypatch, hass_storage):

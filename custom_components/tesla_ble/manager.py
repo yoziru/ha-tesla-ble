@@ -217,8 +217,8 @@ class TeslaBLEManager:
                     "Could not restore Tesla BLE AC energy counter; stored data was preserved"
                 ) from err
         self._create_vehicle()
-        self.paired = self._vehicle.has_private_key and self._store.load("paired_key") == self._key_id()
         self._key_rejected = self._store.load("key_rejected") == b"1"
+        self._sync_pairing()
         self._transport.set_notify_callback(self._on_notify)
         self._tick_cancel = async_track_time_interval(self.hass, self._async_tick, TICK_INTERVAL)
         self._stop_cancel = self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_stop)

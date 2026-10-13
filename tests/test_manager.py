@@ -1251,14 +1251,17 @@ async def test_repair_deleted_vehicle_key_preserves_credentials_and_energy(hass,
             await asyncio.sleep(0)
         async with manager._work():
             await manager._async_disconnect()
-        await hass.async_block_till_done()
+        manager.polling = True
+        manager._next_vcsec_poll = 0.0
+        await settle_until(hass, lambda: manager._key_rejected)
+        manager.polling = False
         result = await hass.config_entries.flow.async_configure(flow_id)
         assert result["step_id"] == "reauth_confirm" and result["errors"] == {"base": "pairing_failed"}
         assert manager._key_rejected and not manager.paired
         result = await hass.config_entries.flow.async_configure(flow_id, {})
         assert result["step_id"] == "reauth_pair"
     await settle_until(hass, lambda: manager.last_command == "Pair: ok")
-    await hass.async_block_till_done()
+    await asyncio.sleep(0.2)
     result = await hass.config_entries.flow.async_configure(flow_id)
     assert result["type"] == "abort" and result["reason"] == "reauth_successful"
     assert manager._store.load("private_key").rstrip(b"\n\x00") == key
@@ -1268,6 +1271,43 @@ async def test_repair_deleted_vehicle_key_preserves_credentials_and_energy(hass,
     assert state_of(hass, "binary_sensor", f"{VIN}_binary_pairing_required") == "off"
     assert manager._store.load("private_key").rstrip(b"\n\x00") == key
     assert manager.energy_total == 12.5 and manager.ac_energy_total == 1.25
+
+
+async def test_reauth_recovers_when_car_pairs_without_status_reply(hass, sim, monkeypatch, hass_storage):
+    """The car accepted the key but never sent a whitelist status reply."""
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: manager.paired and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+    manager._next_vcsec_poll = 0.0
+    sim.set_paired(False)
+    await manager._async_disconnect()
+    manager.polling = True
+    await settle_until(hass, lambda: manager._key_rejected and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+    flows = [
+        flow for flow in hass.config_entries.flow.async_progress() if flow["context"].get("entry_id") == entry.entry_id
+    ]
+    flow_id = flows[0]["flow_id"]
+    result = await hass.config_entries.flow.async_configure(flow_id)
+    assert result["step_id"] == "reauth_confirm"
+
+    async def pair_still_pending() -> None:
+        manager._pairing_pending = True
+        raise HomeAssistantError("Pairing is already waiting for key-card approval")
+
+    monkeypatch.setattr(manager, "async_pair", pair_still_pending)
+    sim.set_paired(True)
+    result = await hass.config_entries.flow.async_configure(flow_id, {})
+    assert result["step_id"] == "reauth_pair"
+    manager.polling = True
+    manager._next_vcsec_poll = 0.0
+    await settle_until(hass, lambda: manager.paired, max_ticks=400)
+    await asyncio.sleep(0.2)
+    result = await hass.config_entries.flow.async_configure(flow_id)
+    assert result["type"] == "abort" and result["reason"] == "reauth_successful"
+    assert manager._store.load("paired_key") == manager._key_id()
+    assert state_of(hass, "binary_sensor", f"{VIN}_binary_pairing_required") == "off"
 
 
 async def test_failed_pair_and_regenerated_key_stay_unpaired_on_reload(hass, sim, monkeypatch, hass_storage):

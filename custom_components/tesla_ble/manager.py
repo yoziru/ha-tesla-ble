@@ -134,6 +134,8 @@ class TeslaBLEManager:
         self._state_received_at: dict[str, float] = {}
         self.paired = False
         self._key_rejected = False
+        self._repairing = False
+        self._repair_rejection_seen = False
         self._issue_id = f"{ISSUE_PAIRING_REQUIRED}_{entry.entry_id}"
         self._tick_cancel: Callable[[], None] | None = None
         self._stop_cancel: Callable[[], None] | None = None
@@ -430,8 +432,41 @@ class TeslaBLEManager:
         self._next_vcsec_poll = 0.0
         self._async_update_pairing_issue()
 
+    @property
+    def pairing_command_pending(self) -> bool:
+        """Whether the vehicle still has a queued pairing request."""
+        return self._vehicle is not None and self._vehicle.pending_command_count > 0
+
+    @property
+    def repair_rejection_seen(self) -> bool:
+        """Whether the car rejected the key again while the user repaired it."""
+        return self._repair_rejection_seen
+
+    def begin_repair(self) -> None:
+        """Let the car's answers decide pairing while the user repairs the key."""
+        self._repairing = True
+        self._repair_rejection_seen = False
+        self._key_rejected = False
+        self._store.remove("key_rejected")
+        self._refresh_pending = True
+        self._next_vcsec_poll = 0.0
+        self._notify()
+
+    def end_repair(self) -> None:
+        """Stop repairing; a rejection the car still reports stays in effect."""
+        self._repairing = False
+        if self._repair_rejection_seen and not self.paired:
+            self._repair_rejection_seen = False
+            self._on_key_not_paired()
+        self._repair_rejection_seen = False
+
     def _on_key_not_paired(self) -> None:
-        if self._key_rejected or self._stopped:
+        if self._stopped:
+            return
+        if self._repairing:
+            self._repair_rejection_seen = True
+            return
+        if self._key_rejected:
             return
         self._key_rejected = True
         self.paired = False
@@ -769,11 +804,12 @@ class TeslaBLEManager:
             action(self._make_result_callback(name))
             await self._transport.async_flush()
 
-    async def async_pair(self, on_complete: Callable[[tesla_ble.CommandResult], None] | None = None) -> None:
+    async def async_pair(self) -> None:
         """Send the whitelist-add request; tap a key card on the console next."""
         async with self._work():
-            if self._pairing_pending:
+            if self._pairing_pending and self.pairing_command_pending:
                 raise HomeAssistantError("Pairing is already waiting for key-card approval")
+            self._pairing_pending = False
             if not self._vehicle.has_private_key:
                 self._vehicle.regenerate_key()
                 if not self._vehicle.has_private_key:
@@ -785,18 +821,11 @@ class TeslaBLEManager:
             self._pairing_pending = True
             self._async_notify_pairing(
                 f"Tap a key card on the console of {self.device_name}, confirm the key on "
-                "the touchscreen, and remove the card. The request times out after about "
-                "30 seconds."
+                "the touchscreen, and remove the card. Keep the car awake and nearby; the "
+                "request retries for a few minutes."
             )
             self._notify()
-            result_callback = self._make_result_callback("Pair")
-
-            def paired(result: tesla_ble.CommandResult) -> None:
-                result_callback(result)
-                if on_complete is not None:
-                    on_complete(result)
-
-            self._vehicle.pair(getattr(tesla_ble.KeysRole, self.role), paired)
+            self._vehicle.pair(getattr(tesla_ble.KeysRole, self.role), self._make_result_callback("Pair"))
             await self._transport.async_flush()
 
     async def async_force_update(self) -> None:

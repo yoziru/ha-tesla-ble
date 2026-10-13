@@ -48,10 +48,10 @@
       }
     },
     "progress": {
-      "pairing": "Tap your key card on the center console, approve Home Assistant's key on the car's screen, then remove the card. Waiting for the vehicle to confirm pairing…"
+      "pairing": "Tap your key card on the center console, approve Home Assistant's key on the car's screen, then remove the card. Keep the car awake and nearby; confirmation can take a few minutes."
     },
     "error": {
-      "pairing_failed": "Pairing was not confirmed. Keep the vehicle awake and nearby, then submit to retry and tap your key card when prompted.",
+      "pairing_failed": "Pairing was not confirmed yet. Keep the vehicle awake and nearby, tap your key card when prompted, then submit again.",
       "invalid_vin": "That does not look like a valid VIN (17 characters, no I/O/Q).",
       "invalid_address": "That does not look like a valid Bluetooth address (AA:BB:CC:DD:EE:FF).",
       "name_mismatch": "The advertised name does not match this VIN. Check both and try again."

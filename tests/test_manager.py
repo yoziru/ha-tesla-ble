@@ -28,7 +28,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 
 from custom_components.tesla_ble import ble as ble_module
 from custom_components.tesla_ble import manager as manager_module
-from custom_components.tesla_ble.const import CONF_ADDRESS, CONF_PAIR_ON_SETUP, CONF_VIN, DOMAIN
+from custom_components.tesla_ble.const import CONF_ADDRESS, CONF_PAIR_ON_SETUP, CONF_ROLE, CONF_VIN, DOMAIN
 from custom_components.tesla_ble.update import TeslaFirmwareUpdate
 
 VIN = "5YJ30123456789ABC"
@@ -85,6 +85,7 @@ async def setup_entry(
     with_key: bool = True,
     pair_on_setup: bool = False,
     reachable: bool = True,
+    role: str | None = None,
 ) -> tuple:
     client = FakeGattClient(sim)
 
@@ -110,6 +111,8 @@ async def setup_entry(
     monkeypatch.setattr(ble_module, "establish_connection", establish)
 
     data = {CONF_VIN: VIN, CONF_ADDRESS: ADDRESS}
+    if role is not None:
+        data[CONF_ROLE] = role
     if pair_on_setup:
         data[CONF_PAIR_ON_SETUP] = True
     entry = MockConfigEntry(domain=DOMAIN, data=data, unique_id=VIN)
@@ -331,24 +334,45 @@ async def test_no_pairing_issue_with_key(hass: HomeAssistant, sim, monkeypatch, 
     assert ir.async_get(hass).async_get_issue(DOMAIN, f"{ISSUE_PAIRING_REQUIRED}_{entry.entry_id}") is None
 
 
-async def test_setup_pairs_automatically(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+@pytest.mark.parametrize("role", [None, "DRIVER", "CHARGING_MANAGER", "VEHICLE_MONITOR"])
+async def test_setup_pairs_automatically(
+    hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth, role
+) -> None:
     """The pairing step of onboarding hands off to a single automatic attempt."""
     from homeassistant.components import persistent_notification
 
     notifications: list[str] = []
+    requested_roles = []
+    pair = tesla_ble.Vehicle.pair
+
+    def record_pair(vehicle, key_role, callback):
+        requested_roles.append(key_role)
+        return pair(vehicle, key_role, callback)
+
+    monkeypatch.setattr(tesla_ble.Vehicle, "pair", record_pair)
     monkeypatch.setattr(
         persistent_notification,
         "async_create",
         lambda hass, message, title=None, notification_id=None: notifications.append(message),
     )
 
-    entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage, with_key=False, pair_on_setup=True)
+    entry, _client = await setup_entry(
+        hass, sim, monkeypatch, hass_storage, with_key=False, pair_on_setup=True, role=role
+    )
     manager = entry.runtime_data
     await settle_until(hass, lambda: manager.paired)
 
     assert state_of(hass, "sensor", f"{VIN}_sensor_last_command") == "Pair: ok"
     assert any("key card" in message for message in notifications)
     assert any("paired" in message.lower() for message in notifications)
+    expected = getattr(tesla_ble.KeysRole, role or "OWNER")
+    assert requested_roles == [expected]
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.runtime_data.paired
+    assert requested_roles == [expected]
+    await entry.runtime_data.async_pair()
+    assert requested_roles == [expected, expected]
 
 
 async def test_setup_pairing_reports_unreachable_vehicle(

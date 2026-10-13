@@ -17,7 +17,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     manager: TeslaBLEManager = entry.runtime_data
-    async_add_entities([TeslaDoorsLock(manager), TeslaChargePortLatchLock(manager)])
+    if manager.can_control_vehicle:
+        async_add_entities([TeslaDoorsLock(manager), TeslaChargePortLatchLock(manager)])
 
 
 class TeslaDoorsLock(TeslaBLEEntity, LockEntity):

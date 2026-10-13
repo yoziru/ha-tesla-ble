@@ -49,7 +49,8 @@ async def async_setup_entry(
     entry: TeslaBLEConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    async_add_entities([TeslaClimate(entry.runtime_data)])
+    if entry.runtime_data.can_control_vehicle:
+        async_add_entities([TeslaClimate(entry.runtime_data)])
 
 
 class TeslaClimate(TeslaBLEEntity, ClimateEntity):

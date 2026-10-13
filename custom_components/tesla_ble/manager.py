@@ -11,7 +11,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from homeassistant.components import persistent_notification
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -30,6 +30,7 @@ from .const import (
     CONF_INFOTAINMENT_POLL_INTERVAL_AWAKE,
     CONF_INFOTAINMENT_SLEEP_TIMEOUT,
     CONF_PAIR_ON_SETUP,
+    CONF_ROLE,
     CONF_VCSEC_POLL_INTERVAL,
     CONF_VIN,
     CONNECT_RETRY_BACKOFF,
@@ -40,6 +41,7 @@ from .const import (
     DEFAULT_VCSEC_POLL_INTERVAL,
     DOMAIN,
     ISSUE_PAIRING_REQUIRED,
+    ROLE_LABELS,
     TICK_INTERVAL,
 )
 
@@ -89,6 +91,11 @@ class TeslaBLEManager:
         self.entry = entry
         self.vin: str = entry.data[CONF_VIN]
         self.address: str = entry.data[CONF_ADDRESS]
+        # Entries created before role selection enrolled OWNER keys. Do not
+        # relabel or silently replace those vehicle credentials.
+        self.role: str = entry.data.get(CONF_ROLE, "OWNER")
+        if self.role not in ROLE_LABELS:
+            raise HomeAssistantError(f"Unsupported vehicle key role: {self.role}")
         self.device_name = f"Tesla {self.vin[-6:]}"
 
         options = entry.options
@@ -153,6 +160,18 @@ class TeslaBLEManager:
         self._poll_policy.set_sleep_timeout_ms(
             options.get(CONF_INFOTAINMENT_SLEEP_TIMEOUT, DEFAULT_INFOTAINMENT_SLEEP_TIMEOUT) * 1000
         )
+
+    @property
+    def can_control_vehicle(self) -> bool:
+        return self.role in ("OWNER", "DRIVER")
+
+    @property
+    def can_control_charging(self) -> bool:
+        return self.can_control_vehicle or self.role == "CHARGING_MANAGER"
+
+    @property
+    def can_wake(self) -> bool:
+        return self.can_control_charging
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -304,7 +323,7 @@ class TeslaBLEManager:
     def _async_notify_paired(self) -> None:
         self._pairing_pending = False
         self._async_notify_pairing(
-            f"{self.device_name} is paired with Home Assistant and can now be controlled over Bluetooth."
+            f"{self.device_name} is paired with Home Assistant with {ROLE_LABELS[self.role]} access over Bluetooth."
         )
 
     def _consume_pair_on_setup(self) -> None:
@@ -660,7 +679,14 @@ class TeslaBLEManager:
             elif result.skipped:
                 text = f"{name}: skipped"
             else:
-                text = f"{name}: failed ({result.error_message})"
+                error = result.error_message or "No error details were reported by the vehicle"
+                if any(reason in error.upper() for reason in ("UNAUTHORIZED", "INSUFFICIENT_PRIVILEGES")):
+                    if name == "Wake" and self.role == "CHARGING_MANAGER":
+                        error = "Vehicle denied wake. Wake the car manually; check its software and key permissions"
+                    else:
+                        error = "Vehicle denied this action. Check the key's permissions in the car"
+                    _LOGGER.debug("Vehicle permission error for %s: %s", name, result.error_message)
+                text = f"{name}: failed ({error})"
                 if result.may_have_succeeded:
                     text += "; outcome unknown"
             self.last_command = text
@@ -672,17 +698,33 @@ class TeslaBLEManager:
                 else:
                     self._pairing_pending = False
                     self._async_notify_pairing(
-                        f"Pairing failed: {result.error_message}. Make sure the vehicle is "
-                        "awake and in range of Bluetooth, then press the Pair button on the "
-                        "device page to try again."
+                        "Pairing failed. Keep the car awake and nearby. Enable Pair vehicle on "
+                        "the device's entity page, press it, then tap your key card and approve "
+                        f"on the car's screen. Details: {result.error_message}"
                     )
                 self._async_update_pairing_issue()
             self._notify()
 
         return callback
 
-    async def async_command(self, name: str, action: Callable[[Callable], None]) -> None:
-        """Run a vehicle command, connecting first if needed."""
+    async def async_command(
+        self,
+        name: str,
+        action: Callable[[Callable], None],
+        *,
+        required_access: Literal["vehicle", "charging", "wake"] = "vehicle",
+    ) -> None:
+        """Check access before connecting; unclassified actions require vehicle controls."""
+        allowed = {
+            "vehicle": self.can_control_vehicle,
+            "charging": self.can_control_charging,
+            "wake": self.can_wake,
+        }.get(required_access, False)
+        if not allowed:
+            raise HomeAssistantError(
+                f"{name} is not allowed with {ROLE_LABELS[self.role]}. "
+                "Pair a new key with Vehicle controls to use this action."
+            )
         async with self._work():
             await self._async_ensure_connected()
             self._last_activity = time.monotonic()
@@ -709,7 +751,7 @@ class TeslaBLEManager:
                 "30 seconds."
             )
             self._notify()
-            self._vehicle.pair(tesla_ble.KeysRole.OWNER, self._make_result_callback("Pair"))
+            self._vehicle.pair(getattr(tesla_ble.KeysRole, self.role), self._make_result_callback("Pair"))
             await self._transport.async_flush()
 
     async def async_force_update(self) -> None:
@@ -717,13 +759,17 @@ class TeslaBLEManager:
             await self._async_ensure_connected()
             self._last_activity = time.monotonic()
             self._vehicle.vcsec_poll()
-            self._vehicle.infotainment_poll(tesla_ble.WakePolicy.WAKE_IF_NEEDED)
-            self._vehicle.software_update_poll(tesla_ble.WakePolicy.WAKE_IF_NEEDED)
+            wake_policy = tesla_ble.WakePolicy.WAKE_IF_NEEDED if self.can_wake else tesla_ble.WakePolicy.NO_WAKE_SKIP
+            self._vehicle.infotainment_poll(wake_policy)
+            self._vehicle.software_update_poll(wake_policy)
             self._poll_policy.on_poll(monotonic_ms())
+            if not self.can_wake:
+                self.last_command = "Refresh: requested without waking. Wake the car manually if data stays unchanged."
+                self._notify()
             await self._transport.async_flush()
 
     async def async_wake(self) -> None:
-        await self.async_command("Wake", lambda cb: self._vehicle.wake(cb))
+        await self.async_command("Wake", lambda cb: self._vehicle.wake(cb), required_access="wake")
 
     async def async_set_polling(self, enabled: bool) -> None:
         """Pause or resume polling the vehicle."""
@@ -745,13 +791,18 @@ class TeslaBLEManager:
         await self.async_command(
             "Start Charging" if enable else "Stop Charging",
             lambda cb: self._vehicle.set_charging_state(enable, cb),
+            required_access="charging",
         )
 
     async def async_set_charging_amps(self, amps: int) -> None:
-        await self.async_command("Set Charging Amps", lambda cb: self._vehicle.set_charging_amps(amps, cb))
+        await self.async_command(
+            "Set Charging Amps", lambda cb: self._vehicle.set_charging_amps(amps, cb), required_access="charging"
+        )
 
     async def async_set_charging_limit(self, limit: int) -> None:
-        await self.async_command("Set Charging Limit", lambda cb: self._vehicle.set_charging_limit(limit, cb))
+        await self.async_command(
+            "Set Charging Limit", lambda cb: self._vehicle.set_charging_limit(limit, cb), required_access="charging"
+        )
 
     async def async_set_climate(self, enable: bool) -> None:
         await self.async_command(

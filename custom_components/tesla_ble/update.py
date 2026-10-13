@@ -52,7 +52,11 @@ class TeslaFirmwareUpdate(TeslaBLEEntity, UpdateEntity):
     @property
     def supported_features(self) -> UpdateEntityFeature:
         features = UpdateEntityFeature.PROGRESS
-        if self.manager.state_fresh("software_update_state") and self.manager.software_update_state.get("status") == 4:
+        if (
+            self.manager.can_control_vehicle
+            and self.manager.state_fresh("software_update_state")
+            and self.manager.software_update_state.get("status") == 4
+        ):
             features |= UpdateEntityFeature.INSTALL
         return features
 
@@ -84,7 +88,11 @@ class TeslaFirmwareUpdate(TeslaBLEEntity, UpdateEntity):
         state = self.manager.software_update_state
         return {
             "status": tesla_ble.software_update_status_text(state.get("status", 0)),
-            "can_cancel": self.manager.state_fresh("software_update_state") and state.get("status") in (3, 5, 6),
+            "can_cancel": (
+                self.manager.can_control_vehicle
+                and self.manager.state_fresh("software_update_state")
+                and state.get("status") in (3, 5, 6)
+            ),
             "expected_duration_sec": state.get("expected_duration_sec"),
         }
 

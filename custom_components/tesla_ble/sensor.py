@@ -31,7 +31,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 import tesla_ble
 
-from .const import TeslaBLEConfigEntry
+from .const import ROLE_LABELS, TeslaBLEConfigEntry
 from .entity import TeslaBLEEntity, async_add_supported_entities
 from .manager import TeslaBLEManager, charger_power_w
 
@@ -134,6 +134,15 @@ class TeslaSensorDescription(SensorEntityDescription):
 
 
 SENSOR_DESCRIPTIONS: tuple[TeslaSensorDescription, ...] = (
+    TeslaSensorDescription(
+        key="key_access",
+        icon="mdi:key-wireless",
+        state=None,
+        value_fn=lambda m: ROLE_LABELS[m.role],
+        device_class=SensorDeviceClass.ENUM,
+        options=list(ROLE_LABELS.values()),
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
     TeslaSensorDescription(
         key="steering_wheel_heat_mode",
         icon="mdi:steering",
@@ -376,6 +385,23 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     manager: TeslaBLEManager = entry.runtime_data
+    if not manager.can_control_charging:
+        async_add_entities(
+            TeslaSensor(manager, description)
+            for description in (
+                TeslaSensorDescription(
+                    key="charge_limit",
+                    value_fn=lambda m: m.charge_state.get("charge_limit_soc"),
+                    native_unit_of_measurement=PERCENTAGE,
+                ),
+                TeslaSensorDescription(
+                    key="charging_amps",
+                    value_fn=lambda m: m.charge_state.get("charging_amps"),
+                    device_class=SensorDeviceClass.CURRENT,
+                    native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+                ),
+            )
+        )
     async_add_entities(
         TeslaSensor(manager, description) for description in SENSOR_DESCRIPTIONS if not description.supported_by
     )

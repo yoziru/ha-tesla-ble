@@ -11,7 +11,7 @@ from homeassistant import config_entries, data_entry_flow
 from homeassistant.components import bluetooth
 
 from custom_components.tesla_ble import config_flow as config_flow_module
-from custom_components.tesla_ble.const import CONF_ADDRESS, CONF_PAIR_ON_SETUP, CONF_VIN, DOMAIN
+from custom_components.tesla_ble.const import CONF_ADDRESS, CONF_PAIR_ON_SETUP, CONF_ROLE, CONF_VIN, DOMAIN
 
 VIN = "5YJ30123456789ABC"
 ADDRESS = "AA:BB:CC:DD:EE:FF"
@@ -36,7 +36,8 @@ def settled_advert(monkeypatch):
     )
 
 
-async def test_manual_flow_creates_entry(hass) -> None:
+@pytest.mark.parametrize("role", [None, "DRIVER", "CHARGING_MANAGER", "VEHICLE_MONITOR"])
+async def test_manual_flow_creates_entry(hass, role) -> None:
     with patch.object(bluetooth, "async_discovered_service_info", return_value=[]):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["type"] == data_entry_flow.FlowResultType.FORM
@@ -47,11 +48,22 @@ async def test_manual_flow_creates_entry(hass) -> None:
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_VIN: VIN})
     assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "role"
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_ROLE: "OWNER"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {} if role is None else {CONF_ROLE: role}
+    )
     assert result["step_id"] == "pair"
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_VIN: VIN, CONF_ADDRESS: ADDRESS, CONF_PAIR_ON_SETUP: True}
+    assert result["data"] == {
+        CONF_VIN: VIN,
+        CONF_ADDRESS: ADDRESS,
+        CONF_PAIR_ON_SETUP: True,
+        CONF_ROLE: role or "DRIVER",
+    }
     assert result["title"] == "Tesla 789ABC"
 
 
@@ -104,6 +116,8 @@ async def test_bluetooth_discovery_flow(hass, settled_advert) -> None:
     assert result["step_id"] == "vin"
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_VIN: vin})
+    assert result["step_id"] == "role"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["step_id"] == "pair"
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
@@ -128,6 +142,8 @@ async def test_bluetooth_discovery_accepts_beacon_without_name(hass, settled_adv
     assert result["type"] == data_entry_flow.FlowResultType.FORM
     assert result["step_id"] == "vin"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_VIN: VIN})
+    assert result["step_id"] == "role"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["step_id"] == "pair"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY

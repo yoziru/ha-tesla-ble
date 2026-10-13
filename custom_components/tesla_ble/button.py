@@ -18,17 +18,14 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     manager: TeslaBLEManager = entry.runtime_data
-    async_add_entities(
-        [
-            TeslaWakeButton(manager),
-            TeslaPairButton(manager),
-            TeslaForceUpdateButton(manager),
-            TeslaRegenerateKeyButton(manager),
-            TeslaUnlatchDriverDoorButton(manager),
-            TeslaFlashLightsButton(manager),
-            TeslaHonkHornButton(manager),
-        ]
-    )
+    entities = [TeslaPairButton(manager), TeslaForceUpdateButton(manager), TeslaRegenerateKeyButton(manager)]
+    if manager.can_wake:
+        entities.append(TeslaWakeButton(manager))
+    if manager.can_control_vehicle:
+        entities.extend(
+            [TeslaUnlatchDriverDoorButton(manager), TeslaFlashLightsButton(manager), TeslaHonkHornButton(manager)]
+        )
+    async_add_entities(entities)
 
 
 class TeslaWakeButton(TeslaBLEEntity, ButtonEntity):
@@ -62,6 +59,8 @@ class TeslaForceUpdateButton(TeslaBLEEntity, ButtonEntity):
 
     def __init__(self, manager: TeslaBLEManager) -> None:
         super().__init__(manager, "button_force_update")
+        if not manager.can_wake:
+            self._attr_translation_key = "refresh_without_waking"
 
     async def async_press(self) -> None:
         await self.manager.async_force_update()

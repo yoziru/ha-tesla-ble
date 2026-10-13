@@ -49,6 +49,8 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: TeslaBLEConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     manager = entry.runtime_data
+    if not manager.can_control_vehicle:
+        return
     entities = [
         (
             TeslaSeatClimateSelect(manager, key, seat, heat_field, cool_field, auto_field),

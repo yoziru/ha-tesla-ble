@@ -23,6 +23,7 @@ from .const import (
     CONF_INFOTAINMENT_POLL_INTERVAL_AWAKE,
     CONF_INFOTAINMENT_SLEEP_TIMEOUT,
     CONF_PAIR_ON_SETUP,
+    CONF_ROLE,
     CONF_VCSEC_POLL_INTERVAL,
     CONF_VIN,
     DEFAULT_DISCONNECT_DELAY,
@@ -39,6 +40,7 @@ from .const import (
     MIN_INFOTAINMENT_POLL_INTERVAL,
     MIN_SLEEP_TIMEOUT,
     MIN_VCSEC_POLL_INTERVAL,
+    ROLE_LABELS,
     SERVICE_UUID,
     TESLA_BEACON_DATA_PREFIX,
     TESLA_BEACON_MANUFACTURER_ID,
@@ -87,6 +89,7 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
         self._address: str | None = None
         self._advertised_name: str | None = None
         self._vin: str | None = None
+        self._role = "DRIVER"
         self._discovered: dict[str, str] = {}
 
     async def async_step_bluetooth(self, discovery_info: BluetoothServiceInfoBleak) -> ConfigFlowResult:
@@ -198,13 +201,29 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors[CONF_VIN] = "name_mismatch"
                 if not errors:
                     self._vin = vin
-                    return await self.async_step_pair()
+                    return await self.async_step_role()
 
         return self.async_show_form(
             step_id="vin",
             data_schema=VIN_SCHEMA,
             errors=errors,
             description_placeholders=placeholders,
+        )
+
+    async def async_step_role(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Choose the permissions requested when enrolling the vehicle key."""
+        if user_input is not None:
+            self._role = user_input[CONF_ROLE]
+            return await self.async_step_pair()
+        return self.async_show_form(
+            step_id="role",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ROLE, default="DRIVER"): vol.In(
+                        {k: v for k, v in ROLE_LABELS.items() if k != "OWNER"}
+                    )
+                }
+            ),
         )
 
     async def async_step_pair(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -216,10 +235,13 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                 data={
                     CONF_VIN: self._vin,
                     CONF_ADDRESS: self._address,
+                    CONF_ROLE: self._role,
                     CONF_PAIR_ON_SETUP: True,
                 },
             )
-        return self.async_show_form(step_id="pair", data_schema=vol.Schema({}))
+        return self.async_show_form(
+            step_id="pair", data_schema=vol.Schema({}), description_placeholders={"role": ROLE_LABELS[self._role]}
+        )
 
     @staticmethod
     @callback

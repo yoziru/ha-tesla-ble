@@ -22,6 +22,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     manager: TeslaBLEManager = entry.runtime_data
+    if not manager.can_control_vehicle:
+        return
     async_add_entities(
         [
             TeslaTrunkCover(manager),

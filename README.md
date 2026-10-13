@@ -72,11 +72,32 @@ Nearby cars are **automatically discovered** under **Settings → Devices & Serv
 2. Select the car and enter its **VIN**. If it is not discovered,
    enter its Bluetooth address manually; find it in Bluetooth's
    **Advertisement monitor**.
-3. When prompted, tap a **key card on the car's center-console reader**.
+3. Choose **Vehicle controls**, **Charging controls**, or **Read-only monitoring**.
+4. When prompted, tap a **key card on the car's center-console reader**.
    Pairing progress and results appear in Home Assistant notifications.
 
 If pairing fails, enable **Pair vehicle** on the device's entity page and press
 it to retry. Add the integration separately for each vehicle.
+
+### Key access level
+
+All modes read vehicle data. Access determines which controls appear.
+
+| Access level | Vehicle key role | Controls |
+| --- | --- | --- |
+| Vehicle controls (default) | DRIVER | Normal controls; no key or access management |
+| Charging controls | CHARGING_MANAGER | Start/stop, amps, charge limit; wake needs compatible car software |
+| Read-only monitoring | VEHICLE_MONITOR | No vehicle controls; refresh does not wake the car |
+
+Charging controls excludes charge-port opening/closing and cable unlocking.
+Restricted modes show status instead of lock/cover controls and cannot install
+or cancel car updates. Pairing, key regeneration and polling remain available.
+
+**Configured key access** shows the recorded role, not a vehicle-verified role.
+Older installations keep their **OWNER** key; new setups never request OWNER.
+Access changes are not yet supported in-place. To change access, remove the old
+key from the car and set up the integration again. Removing the integration
+also deletes its local keys and Energy counter; it does not revoke the car's key.
 
 ## Daily use
 
@@ -97,7 +118,8 @@ Open the Tesla BLE device page to find its sensors and controls.
 ### Sleep and availability
 
 Automatic polling does not send wake commands. **Force refresh vehicle data**
-and explicit controls can wake the car. A sleeping car may show **cached data**, not current
+and explicit controls can wake the car, except in read-only monitoring mode.
+A sleeping car may show **cached data**, not current
 measurements. When it leaves Bluetooth range, telemetry becomes unavailable
 after about two minutes; **Location** changes to `not_home`.
 

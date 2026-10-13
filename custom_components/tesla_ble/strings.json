@@ -33,9 +33,14 @@
           "vin": "VIN"
         }
       },
+      "role": {
+        "title": "Vehicle key access",
+        "description": "All modes read vehicle data.\n\n- **Vehicle controls** (default): normal controls, without key or access management.\n- **Charging controls**: start/stop, amps and charge limit. No charge-port controls; wake needs compatible car software.\n- **Read-only monitoring**: no vehicle controls; refresh does not wake the car.\n\nAccess cannot be changed in integration options.",
+        "data": {"role": "Access level"}
+      },
       "pair": {
         "title": "Pair with your vehicle",
-        "description": "Home Assistant needs its own key on the vehicle before it can send commands. Pairing installs the key, and the vehicle approves it when you tap a key card on the center console.\n\n1. Make sure the vehicle is awake and in Bluetooth range.\n2. Press **Submit**, then hold a key card against the center console.\n3. Confirm the key on the vehicle's touchscreen, then remove the card.\n\nIf pairing fails or the vehicle is not nearby right now, you can retry anytime with the **Pair** button on the vehicle's device page."
+        "description": "Pair Home Assistant's key with **{role}** access.\n\n1. Keep the car awake and nearby.\n2. Press **Submit**, then tap your key card on the center console.\n3. Approve on the car's screen and remove the card.\n\nTo retry, enable **Pair vehicle** on the device's entity page, then press it."
       }
     },
     "error": {
@@ -67,6 +72,13 @@
   },
   "entity": {
     "binary_sensor": {
+      "doors_lock": {"name": "Doors lock"},
+      "charge_port": {"name": "Charge port door"},
+      "charge_port_latch": {"name": "Charge port latch"},
+      "trunk": {"name": "Trunk"},
+      "frunk": {"name": "Frunk"},
+      "windows_open": {"name": "Windows"},
+      "sentry_mode": {"name": "Sentry mode"},
       "asleep": {
         "name": "Asleep"
       },
@@ -114,6 +126,7 @@
       "cop_activation_temperature": {"name": "Cabin overheat temperature"}
     },
     "button": {
+      "refresh_without_waking": {"name": "Refresh without waking"},
       "flash_lights": {
         "name": "Flash lights"
       },
@@ -175,6 +188,9 @@
       }
     },
     "sensor": {
+      "key_access": {"name": "Configured key access"},
+      "charge_limit": {"name": "Charge limit"},
+      "charging_amps": {"name": "Charging amps"},
       "steering_wheel_heat_mode": {"name": "Steering heat mode"},
       "battery_level": {
         "name": "Battery"

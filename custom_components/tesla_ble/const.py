@@ -34,6 +34,13 @@ TESLA_BEACON_DATA_PREFIX = bytes.fromhex("021574278bdab64445208f0c720eaf059935")
 # Config entry data
 CONF_VIN = "vin"
 CONF_ADDRESS = "address"
+CONF_ROLE = "role"
+ROLE_LABELS = {
+    "DRIVER": "Vehicle controls",
+    "CHARGING_MANAGER": "Charging controls",
+    "VEHICLE_MONITOR": "Read-only monitoring",
+    "OWNER": "Owner (legacy)",
+}
 # One-shot flag set by the config flow: pair right after the entry is added.
 CONF_PAIR_ON_SETUP = "pair_on_setup"
 

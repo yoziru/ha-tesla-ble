@@ -163,6 +163,51 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[TeslaBinarySensorDescription, ...] = (
 )
 
 
+READ_ONLY_DESCRIPTIONS: tuple[TeslaBinarySensorDescription, ...] = (
+    TeslaBinarySensorDescription(
+        key="doors_lock",
+        value_fn=lambda m: None if m.vehicle_status.get("locked") is None else not m.vehicle_status["locked"],
+        device_class=BinarySensorDeviceClass.LOCK,
+    ),
+    TeslaBinarySensorDescription(
+        key="charge_port",
+        state="charge_state",
+        value_fn=lambda m: m.charge_state.get("charge_port_door_open"),
+        device_class=BinarySensorDeviceClass.DOOR,
+    ),
+    TeslaBinarySensorDescription(
+        key="charge_port_latch",
+        state="charge_state",
+        value_fn=lambda m: (
+            None if m.charge_state.get("charge_port_latch") not in (2, 3) else m.charge_state["charge_port_latch"] == 2
+        ),
+        device_class=BinarySensorDeviceClass.LOCK,
+    ),
+    TeslaBinarySensorDescription(
+        key="trunk", value_fn=lambda m: _closure(m, "rear_trunk"), device_class=BinarySensorDeviceClass.DOOR
+    ),
+    TeslaBinarySensorDescription(
+        key="frunk", value_fn=lambda m: _closure(m, "front_trunk"), device_class=BinarySensorDeviceClass.DOOR
+    ),
+    TeslaBinarySensorDescription(
+        key="windows_open",
+        state="closures_state",
+        value_fn=lambda m: _any([_window(m, key) for key in WINDOW_KEYS.values()]),
+        attrs_fn=_window_attributes,
+        device_class=BinarySensorDeviceClass.WINDOW,
+    ),
+    TeslaBinarySensorDescription(
+        key="sentry_mode",
+        state="closures_state",
+        value_fn=lambda m: (
+            None
+            if m.closures_state.get("sentry_mode_state") is None
+            else tesla_ble.sentry_mode_active(m.closures_state["sentry_mode_state"])
+        ),
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: TeslaBLEConfigEntry,
@@ -170,6 +215,8 @@ async def async_setup_entry(
 ) -> None:
     manager: TeslaBLEManager = entry.runtime_data
     async_add_entities(TeslaBinarySensor(manager, description) for description in BINARY_SENSOR_DESCRIPTIONS)
+    if not manager.can_control_vehicle:
+        async_add_entities(TeslaBinarySensor(manager, description) for description in READ_ONLY_DESCRIPTIONS)
 
 
 class TeslaBinarySensor(TeslaBLEEntity, BinarySensorEntity):

@@ -20,13 +20,14 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     manager: TeslaBLEManager = entry.runtime_data
-    async_add_entities(
-        [
-            TeslaChargingSwitch(manager),
-            TeslaSentryModeSwitch(manager),
-            TeslaPollingSwitch(manager),
-        ]
-    )
+    entities = [TeslaPollingSwitch(manager)]
+    if manager.can_control_charging:
+        entities.append(TeslaChargingSwitch(manager))
+    if manager.can_control_vehicle:
+        entities.append(TeslaSentryModeSwitch(manager))
+    async_add_entities(entities)
+    if not manager.can_control_vehicle:
+        return
     async_add_supported_entities(
         manager,
         async_add_entities,

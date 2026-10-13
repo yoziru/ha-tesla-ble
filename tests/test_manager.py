@@ -923,6 +923,47 @@ async def test_ac_energy_integrates_power_and_survives_reload(hass, sim, monkeyp
     assert float(hass.states.get(energy_id).state) == pytest.approx(0.575, abs=0.01)
 
 
+@pytest.mark.parametrize("sleeping", [False, True])
+@pytest.mark.parametrize("reconnect", [False, True])
+async def test_return_home_refreshes_without_waiting_or_waking(
+    hass, sim, monkeypatch, hass_storage, sleeping, reconnect
+):
+    from homeassistant.components import bluetooth
+
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: bool(manager.charge_state) and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+    if reconnect:
+        await manager._async_disconnect()
+    manager.rssi = None
+    manager._state_received_at.clear()
+    sim.set_battery_level(61)
+    sim.set_sleeping(sleeping)
+    manager._next_vcsec_poll = time.monotonic() + 3600
+    manager._poll_policy.set_awake_interval_ms(3600_000)
+    manager._poll_policy.set_active_interval_ms(3600_000)
+    manager._poll_policy.on_poll(manager_module.monotonic_ms())
+    manager._connect_blocked_until = time.monotonic() + 3600
+    assert not manager.reachable
+    manager._update_rssi()
+    assert manager.reachable
+    await manager._async_handle_polls()
+    assert manager._vehicle.pending_command_count == 0
+    manager.polling = True
+    await manager._async_run_tick()
+    manager.polling = False
+    await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
+    assert manager.state_fresh("vehicle_status")
+    assert manager.vehicle_status["asleep"] is sleeping
+    assert manager.charge_state["battery_level"] == (55 if sleeping else 61)
+    manager._next_vcsec_poll = time.monotonic() + 3600
+    monkeypatch.setattr(bluetooth, "async_last_service_info", lambda *a, **kw: None)
+    manager._state_received_at.clear()
+    manager._update_rssi()
+    assert not manager.reachable
+
+
 async def test_automatic_poll_does_not_wake_car_with_stale_awake_telemetry(hass, sim, monkeypatch, hass_storage):
     entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
@@ -1168,6 +1209,64 @@ async def test_pair_waits_for_durable_key_and_aborts_on_disk_error(hass, sim, mo
             assert manager.connected
             assert "private_key" in hass_storage[f"{DOMAIN}.{entry.entry_id}"]["data"]
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+@pytest.mark.parametrize("retry", [False, True])
+async def test_repair_deleted_vehicle_key_preserves_credentials_and_energy(hass, sim, monkeypatch, hass_storage, retry):
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: manager.paired and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+    key = manager._store.load("private_key").rstrip(b"\n\x00")
+    manager.energy_total = 38.42
+    manager.ac_energy_total = 1.25
+    manager._save_energy()
+    manager._save_ac_energy()
+    sim.set_paired(False)
+    await manager._async_disconnect()
+    manager._next_vcsec_poll = 0.0
+    manager.polling = True
+    await settle_until(hass, lambda: manager._key_rejected)
+    manager.polling = False
+    assert not manager.paired
+    assert state_of(hass, "binary_sensor", f"{VIN}_binary_pairing_required") == "on"
+    assert not manager.state_available("charge_state")
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    manager = entry.runtime_data
+    assert manager._key_rejected and not manager.paired
+    with pytest.raises(HomeAssistantError, match="Reauthenticate"):
+        await manager.async_force_update()
+    flows = [
+        flow for flow in hass.config_entries.flow.async_progress() if flow["context"].get("entry_id") == entry.entry_id
+    ]
+    assert len(flows) == 1 and flows[0]["context"]["source"] == "reauth"
+    flow_id = flows[0]["flow_id"]
+    result = await hass.config_entries.flow.async_configure(flow_id)
+    assert result["step_id"] == "reauth_confirm"
+    result = await hass.config_entries.flow.async_configure(flow_id, {})
+    assert result["step_id"] == "reauth_pair"
+    if retry:
+        while not manager._pairing_pending:
+            await asyncio.sleep(0)
+        async with manager._work():
+            await manager._async_disconnect()
+        await hass.async_block_till_done()
+        result = await hass.config_entries.flow.async_configure(flow_id)
+        assert result["step_id"] == "reauth_confirm" and result["errors"] == {"base": "pairing_failed"}
+        assert manager._key_rejected and not manager.paired
+        result = await hass.config_entries.flow.async_configure(flow_id, {})
+        assert result["step_id"] == "reauth_pair"
+    await settle_until(hass, lambda: manager.last_command == "Pair: ok")
+    await hass.async_block_till_done()
+    result = await hass.config_entries.flow.async_configure(flow_id)
+    assert result["type"] == "abort" and result["reason"] == "reauth_successful"
+    assert manager._store.load("private_key").rstrip(b"\n\x00") == key
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    manager = entry.runtime_data
+    assert manager.paired and not manager._key_rejected
+    assert state_of(hass, "binary_sensor", f"{VIN}_binary_pairing_required") == "off"
+    assert manager._store.load("private_key").rstrip(b"\n\x00") == key
+    assert manager.energy_total == 38.42 and manager.ac_energy_total == 1.25
 
 
 async def test_failed_pair_and_regenerated_key_stay_unpaired_on_reload(hass, sim, monkeypatch, hass_storage):

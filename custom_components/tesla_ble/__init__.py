@@ -36,6 +36,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaBLEConfigEntry) -> 
     except HomeAssistantError as err:
         raise ConfigEntryNotReady(str(err)) from err
     entry.runtime_data = manager
+    if manager._key_rejected:
+        entry.async_start_reauth(hass)
     registry = er.async_get(hass)
     if "steering_wheel_heater" not in manager.capabilities:
         steering_id = registry.async_get_entity_id("switch", "tesla_ble", f"{manager.vin}_switch_steering_wheel_heat")

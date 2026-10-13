@@ -13,6 +13,7 @@ from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
 
 import tesla_ble
 
@@ -82,6 +83,8 @@ def _is_tesla_advert(info: BluetoothServiceInfoBleak) -> bool:
 
 class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     """Add a Tesla vehicle, discovered over Bluetooth or entered manually."""
+
+    _repair_task: asyncio.Task | None = None
 
     VERSION = 1
 
@@ -276,6 +279,52 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=vol.Schema({vol.Required(CONF_ADDRESS, default=entry.data[CONF_ADDRESS]): str}),
             errors=errors,
+        )
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        entry = self._get_reauth_entry()
+        if (manager := getattr(entry, "runtime_data", None)) is not None and manager.paired:
+            return self.async_update_and_abort(entry, data_updates={})
+        if user_input is not None:
+            return await self.async_step_reauth_pair()
+        return self.async_show_form(step_id="reauth_confirm", data_schema=vol.Schema({}))
+
+    async def _async_repair_pairing(self) -> bool:
+        entry = self._get_reauth_entry()
+        manager = getattr(entry, "runtime_data", None)
+        if manager is None:
+            return False
+        result = self.hass.loop.create_future()
+
+        def completed(value: tesla_ble.CommandResult) -> None:
+            if not result.done():
+                result.set_result(value.success)
+
+        try:
+            async with asyncio.timeout(45):
+                await manager.async_pair(on_complete=completed)
+                return await result
+        except HomeAssistantError, TimeoutError:
+            return False
+
+    async def async_step_reauth_pair(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if self._repair_task is None:
+            self._repair_task = self.hass.async_create_task(self._async_repair_pairing())
+        if not self._repair_task.done():
+            return self.async_show_progress(
+                step_id="reauth_pair", progress_action="pairing", progress_task=self._repair_task
+            )
+        return self.async_show_progress_done(next_step_id="reauth_finish")
+
+    async def async_step_reauth_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if self._repair_task.result():
+            return self.async_update_and_abort(self._get_reauth_entry(), data_updates={})
+        self._repair_task = None
+        return self.async_show_form(
+            step_id="reauth_confirm", data_schema=vol.Schema({}), errors={"base": "pairing_failed"}
         )
 
 

@@ -26,6 +26,10 @@
           "address": "Bluetooth address"
         }
       },
+      "reauth_confirm": {
+        "title": "Pair with your vehicle again",
+        "description": "The car no longer accepts Home Assistant's key.\n\nKeep the car awake and nearby. Press **Submit**, tap your key card on the center console, then approve on the car's screen.\n\nYour existing key, entities and Energy history are kept."
+      },
       "vin": {
         "title": "Vehicle identification number",
         "description": "Enter the 17-character VIN of the vehicle at {address}. You can find it on the windshield, in the vehicle under Controls → Software, or on your registration.",
@@ -43,7 +47,11 @@
         "description": "Pair Home Assistant's key with **{role}** access.\n\n1. Keep the car awake and nearby.\n2. Press **Submit**, then tap your key card on the center console.\n3. Approve on the car's screen and remove the card.\n\nTo retry, enable **Pair vehicle** on the device's entity page, then press it."
       }
     },
+    "progress": {
+      "pairing": "Tap your key card on the center console, approve Home Assistant's key on the car's screen, then remove the card. Waiting for the vehicle to confirm pairing…"
+    },
     "error": {
+      "pairing_failed": "Pairing was not confirmed. Keep the vehicle awake and nearby, then submit to retry and tap your key card when prompted.",
       "invalid_vin": "That does not look like a valid VIN (17 characters, no I/O/Q).",
       "invalid_address": "That does not look like a valid Bluetooth address (AA:BB:CC:DD:EE:FF).",
       "name_mismatch": "The advertised name does not match this VIN. Check both and try again."
@@ -52,7 +60,8 @@
       "already_configured": "This vehicle is already configured.",
       "not_supported": "This Bluetooth device is not a Tesla vehicle.",
       "not_seen": "The vehicle stopped advertising before setup started.",
-      "reconfigure_successful": "Bluetooth address updated."
+      "reconfigure_successful": "Bluetooth address updated.",
+      "reauth_successful": "Home Assistant's key is paired with the vehicle again."
     }
   },
   "options": {
@@ -72,6 +81,7 @@
   },
   "entity": {
     "binary_sensor": {
+      "pairing_required": {"name": "Pairing required"},
       "doors_lock": {"name": "Doors lock"},
       "charge_port": {"name": "Charge port door"},
       "charge_port_latch": {"name": "Charge port latch"},

@@ -78,6 +78,9 @@ Nearby cars are **automatically discovered** under **Settings → Devices & Serv
 
 If pairing fails, enable **Pair vehicle** on the device's entity page and press
 it to retry. Add the integration separately for each vehicle.
+If you removed HA's key from the car, use **Pair vehicle** again; keep the
+integration and its existing key to preserve Energy/history.
+When the car rejects the key, **Reauthenticate** guides you through pairing again.
 
 ### Key access level
 
@@ -122,6 +125,8 @@ and explicit controls can wake the car, except in read-only monitoring mode.
 A sleeping car may show **cached data**, not current
 measurements. When it leaves Bluetooth range, telemetry becomes unavailable
 after about two minutes; **Location** changes to `not_home`.
+Returning to range or reconnecting requests fresh data without waking the car.
+**Connection** reports the Bluetooth link, not whether the key is authorized.
 
 Defaults: vehicle status every **60 seconds**, awake data every **30 seconds**,
 charging/sentry data every **10 seconds**, and idle/asleep data every

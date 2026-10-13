@@ -133,10 +133,12 @@ class TeslaBLEManager:
         self._stopped = False
         self._state_received_at: dict[str, float] = {}
         self.paired = False
+        self._key_rejected = False
         self._issue_id = f"{ISSUE_PAIRING_REQUIRED}_{entry.entry_id}"
         self._tick_cancel: Callable[[], None] | None = None
         self._stop_cancel: Callable[[], None] | None = None
         self._next_vcsec_poll = 0.0
+        self._refresh_pending = False
         self._pairing_notification_id = f"{DOMAIN}_pairing_{entry.entry_id}"
         self._pairing_pending = False
         self._pairing_tasks: set[asyncio.Task] = set()
@@ -216,6 +218,7 @@ class TeslaBLEManager:
                 ) from err
         self._create_vehicle()
         self.paired = self._vehicle.has_private_key and self._store.load("paired_key") == self._key_id()
+        self._key_rejected = self._store.load("key_rejected") == b"1"
         self._transport.set_notify_callback(self._on_notify)
         self._tick_cancel = async_track_time_interval(self.hass, self._async_tick, TICK_INTERVAL)
         self._stop_cancel = self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_stop)
@@ -235,6 +238,7 @@ class TeslaBLEManager:
         self._vehicle.set_tire_pressure_state_callback(self._on_tire_pressure_state)
         self._vehicle.set_closures_state_callback(self._on_closures_state)
         self._vehicle.set_software_update_state_callback(self._on_software_update_state)
+        self._vehicle.set_key_not_paired_callback(self._on_key_not_paired)
 
     def _key_id(self) -> bytes | None:
         key = self._store.load("private_key")
@@ -386,6 +390,8 @@ class TeslaBLEManager:
         once the status itself is stale the car is out of range and all
         telemetry expires.
         """
+        if self._key_rejected:
+            return False
         status_fresh = self.state_fresh("vehicle_status")
         if not self.polling:
             # Polling was paused by the user: keep the last known values.
@@ -404,7 +410,11 @@ class TeslaBLEManager:
         self._notify()
 
     def _sync_pairing(self) -> None:
-        confirmed = self._vehicle.has_private_key and self._store.load("paired_key") == self._key_id()
+        confirmed = (
+            not self._key_rejected
+            and self._vehicle.has_private_key
+            and self._store.load("paired_key") == self._key_id()
+        )
         if self.paired != confirmed:
             self.paired = confirmed
             if confirmed and self._pairing_pending:
@@ -412,9 +422,25 @@ class TeslaBLEManager:
             self._async_update_pairing_issue()
 
     def _mark_paired(self) -> None:
+        self._key_rejected = False
+        self._store.remove("key_rejected")
         self.paired = True
         self._store.save("paired_key", self._key_id())
+        self._refresh_pending = True
+        self._next_vcsec_poll = 0.0
         self._async_update_pairing_issue()
+
+    def _on_key_not_paired(self) -> None:
+        if self._key_rejected or self._stopped:
+            return
+        self._key_rejected = True
+        self.paired = False
+        self._store.remove("paired_key")
+        self._store.save("key_rejected", b"1")
+        self._state_received_at.clear()
+        self.last_command = "Pairing required: the vehicle rejected Home Assistant's key"
+        self.entry.async_start_reauth(self.hass)
+        self._notify()
 
     # ------------------------------------------------------------------
     # C++ callbacks (event loop thread)
@@ -567,6 +593,7 @@ class TeslaBLEManager:
         self._last_activity = time.monotonic()
         self._connect_blocked_until = 0.0
         self._next_vcsec_poll = 0.0
+        self._refresh_pending = True
         self._notify()
 
     async def _async_disconnect(self) -> None:
@@ -615,12 +642,17 @@ class TeslaBLEManager:
     def _update_rssi(self) -> None:
         from homeassistant.components import bluetooth
 
+        was_reachable = self.reachable
         info = bluetooth.async_last_service_info(self.hass, self.address, connectable=True)
         if info is not None and time.monotonic() - info.time > RSSI_MAX_AGE_SECONDS:
             info = None  # stale advert: the vehicle is out of range
         rssi = info.rssi if info is not None else None
         if rssi != self.rssi:
             self.rssi = rssi
+            if not was_reachable and self.reachable:
+                self._refresh_pending = True
+                self._next_vcsec_poll = 0.0
+                self._connect_blocked_until = 0.0
             self._notify()
 
     def _infotainment_poll_decision(self, now_ms: int) -> dict[str, Any]:
@@ -634,13 +666,13 @@ class TeslaBLEManager:
         return self._poll_policy.update(now_ms, is_asleep, is_charging, is_sentry)
 
     async def _async_handle_polls(self) -> None:
-        if not self.polling or self._vehicle.pending_command_count:
+        if not self.polling or self._key_rejected or self._vehicle.pending_command_count:
             return
         now = time.monotonic()
         now_ms = monotonic_ms()
-        vcsec_due = now >= self._next_vcsec_poll
+        vcsec_due = self._refresh_pending or now >= self._next_vcsec_poll
         decision = self._infotainment_poll_decision(now_ms)
-        infotainment_due = self._poll_policy.should_poll(now_ms, decision["interval_ms"])
+        infotainment_due = self._refresh_pending or self._poll_policy.should_poll(now_ms, decision["interval_ms"])
         if not (vcsec_due or infotainment_due):
             return
 
@@ -652,12 +684,13 @@ class TeslaBLEManager:
                 self._next_vcsec_poll = now + CONNECT_RETRY_BACKOFF.total_seconds()
                 return
 
-        if vcsec_due:
-            self._vehicle.vcsec_poll()
+        if vcsec_due or self._refresh_pending:
+            self._vehicle.vcsec_poll(tesla_ble.WakePolicy.NO_WAKE_SKIP)
             self._next_vcsec_poll = now + self.vcsec_poll_interval
-        if infotainment_due:
+        if infotainment_due or self._refresh_pending:
             self._vehicle.infotainment_poll(tesla_ble.WakePolicy.NO_WAKE_SKIP)
             self._poll_policy.on_poll(now_ms)
+        self._refresh_pending = False
         await self._transport.async_flush()
 
     async def _async_handle_idle_disconnect(self) -> None:
@@ -715,6 +748,8 @@ class TeslaBLEManager:
         required_access: Literal["vehicle", "charging", "wake"] = "vehicle",
     ) -> None:
         """Check access before connecting; unclassified actions require vehicle controls."""
+        if self._key_rejected:
+            raise HomeAssistantError("Pairing required. Reauthenticate Tesla BLE in Settings → Devices & services")
         allowed = {
             "vehicle": self.can_control_vehicle,
             "charging": self.can_control_charging,
@@ -733,9 +768,11 @@ class TeslaBLEManager:
             action(self._make_result_callback(name))
             await self._transport.async_flush()
 
-    async def async_pair(self) -> None:
+    async def async_pair(self, on_complete: Callable[[tesla_ble.CommandResult], None] | None = None) -> None:
         """Send the whitelist-add request; tap a key card on the console next."""
         async with self._work():
+            if self._pairing_pending:
+                raise HomeAssistantError("Pairing is already waiting for key-card approval")
             if not self._vehicle.has_private_key:
                 self._vehicle.regenerate_key()
                 if not self._vehicle.has_private_key:
@@ -751,10 +788,19 @@ class TeslaBLEManager:
                 "30 seconds."
             )
             self._notify()
-            self._vehicle.pair(getattr(tesla_ble.KeysRole, self.role), self._make_result_callback("Pair"))
+            result_callback = self._make_result_callback("Pair")
+
+            def paired(result: tesla_ble.CommandResult) -> None:
+                result_callback(result)
+                if on_complete is not None:
+                    on_complete(result)
+
+            self._vehicle.pair(getattr(tesla_ble.KeysRole, self.role), paired)
             await self._transport.async_flush()
 
     async def async_force_update(self) -> None:
+        if self._key_rejected:
+            raise HomeAssistantError("Pairing required. Reauthenticate Tesla BLE in Settings → Devices & services")
         async with self._work():
             await self._async_ensure_connected()
             self._last_activity = time.monotonic()

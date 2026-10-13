@@ -160,6 +160,13 @@ BINARY_SENSOR_DESCRIPTIONS: tuple[TeslaBinarySensorDescription, ...] = (
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    TeslaBinarySensorDescription(
+        key="pairing_required",
+        state=None,
+        value_fn=lambda m: not m.paired,
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
 )
 
 

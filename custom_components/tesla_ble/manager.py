@@ -299,7 +299,7 @@ class TeslaBLEManager:
         """Surface a repair issue while no key is paired with the vehicle."""
         if self._vehicle is None:
             return
-        if self.paired:
+        if self.paired or self._key_rejected:
             ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
         else:
             ir.async_create_issue(
@@ -439,6 +439,7 @@ class TeslaBLEManager:
         self._store.save("key_rejected", b"1")
         self._state_received_at.clear()
         self.last_command = "Pairing required: the vehicle rejected Home Assistant's key"
+        self._async_update_pairing_issue()
         self.entry.async_start_reauth(self.hass)
         self._notify()
 

@@ -10,7 +10,7 @@ from homeassistant.components.cover import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .binary_sensor import _any, _window_attributes
+from .binary_sensor import _any, _closure, _window_attributes
 from .const import TeslaBLEConfigEntry
 from .entity import TeslaBLEEntity, async_add_supported_entities
 from .manager import TeslaBLEManager
@@ -37,13 +37,6 @@ async def async_setup_entry(
     )
 
 
-def _closure_open(manager: TeslaBLEManager, key: str) -> bool | None:
-    value = manager.vehicle_status.get("closures", {}).get(key)
-    if value is None:
-        return None
-    return value in ("open", "ajar", "opening")
-
-
 class TeslaTrunkCover(TeslaBLEEntity, CoverEntity):
     _attr_translation_key = "trunk"
     _attr_device_class = CoverDeviceClass.DOOR
@@ -54,7 +47,7 @@ class TeslaTrunkCover(TeslaBLEEntity, CoverEntity):
 
     @property
     def is_closed(self) -> bool | None:
-        value = _closure_open(self.manager, "rear_trunk")
+        value = _closure(self.manager, "rear_trunk")
         return None if value is None else not value
 
     async def async_open_cover(self, **kwargs) -> None:
@@ -74,7 +67,7 @@ class TeslaFrunkCover(TeslaBLEEntity, CoverEntity):
 
     @property
     def is_closed(self) -> bool | None:
-        value = _closure_open(self.manager, "front_trunk")
+        value = _closure(self.manager, "front_trunk")
         return None if value is None else not value
 
     async def async_open_cover(self, **kwargs) -> None:

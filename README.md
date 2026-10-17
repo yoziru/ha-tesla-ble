@@ -128,6 +128,17 @@ after about two minutes; **Location** changes to `not_home`.
 Returning to range or reconnecting requests fresh data without waking the car.
 **Connection** reports the Bluetooth link, not whether the key is authorized.
 
+| Vehicle state | Telemetry |
+| --- | --- |
+| Awake, answering status requests | Fresh readings; individual data groups expire if updates stop. |
+| Asleep, still answering status requests | Last observed readings remain visible without waking the car. |
+| No recent status, whether last seen awake or asleep | Live readings become unavailable, even if Bluetooth adverts are still visible. |
+
+Cached readings survive HA restarts, but restoring data never establishes
+reachability: live readings stay unavailable until the vehicle answers again.
+While the vehicle is away, use HA history for earlier readings. Bluetooth
+presence is not GPS location.
+
 Defaults: vehicle status every **60 seconds**, awake data every **30 seconds**,
 charging/sentry data every **10 seconds**, and idle/asleep data every
 **660 seconds**. Idle disconnect defaults to **120 seconds**. Bluetooth activity
@@ -135,6 +146,8 @@ can still affect sleep and battery use.
 
 Use the **Polling** switch to pause updates—not HA's generic **Enable polling
 for changes** option. Force refresh and controls still work while paused.
+Pausing does not freeze availability: live readings still expire when status
+gets stale.
 
 ### Useful limitations
 

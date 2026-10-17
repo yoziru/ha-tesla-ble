@@ -60,13 +60,25 @@ CHARGING_ACTIVE_STATES = ("Charging", "Starting")
 # HA's total_increasing statistics only treat a drop below 90% of the previous
 # reading as a reset; smaller dips are meter jitter/revisions (see sensor/recorder.py).
 ENERGY_RESET_RATIO = 0.9
-# AC energy is integrated from power samples; a sample is only trusted this long
-# when charging may have stopped unobserved (car asleep/unreachable).
+# AC energy is integrated from power samples; only the start of a gap is trusted
+# because a stop or restart while unobserved is indistinguishable from a
+# continuing session.
 AC_ENERGY_MAX_GAP_SECONDS = 300
 
 # Advert RSSI is only meaningful for a few minutes; stale history from
 # habluetooth must not look like the vehicle is still nearby.
 RSSI_MAX_AGE_SECONDS = 300
+
+# Infotainment data arrives on the current poll cadence; the vehicle status
+# arrives from VCSEC, and update state only refreshes on demand.
+INFOTAINMENT_STATES = (
+    "charge_state",
+    "climate_state",
+    "closures_state",
+    "drive_state",
+    "tire_pressure_state",
+)
+TELEMETRY_STATES = ("vehicle_status", "software_update_state", *INFOTAINMENT_STATES)
 
 
 def monotonic_ms() -> int:
@@ -113,7 +125,6 @@ class TeslaBLEManager:
         self.ac_energy_total = 0.0
         self._ac_energy_last_power: float | None = None
         self._ac_energy_last_time = 0.0
-        self._ac_energy_charging = False
         self.climate_state: dict[str, Any] = {}
         self.drive_state: dict[str, Any] = {}
         self.closures_state: dict[str, Any] = {}
@@ -133,6 +144,7 @@ class TeslaBLEManager:
         self._tasks: set[asyncio.Task] = set()
         self._stopped = False
         self._state_received_at: dict[str, float] = {}
+        self.state_observed_at: dict[str, datetime] = {}
         self.paired = False
         self._key_rejected = False
         self._repairing = False
@@ -187,6 +199,25 @@ class TeslaBLEManager:
         await self._store.async_flush()
         self.polling = self._store.load("polling") != b"0"
         self.capabilities = set(json.loads(self._store.load("capabilities") or b"[]"))
+        saved = self._store.load("telemetry")
+        if saved is not None:
+            try:
+                observations = json.loads(saved)
+                restored = {}
+                for state in TELEMETRY_STATES:
+                    if state not in observations:
+                        continue
+                    observation = observations[state]
+                    observed_at = dt_util.parse_datetime(observation["observed_at"])
+                    if observed_at is None or observed_at.tzinfo is None or not isinstance(observation["data"], dict):
+                        raise ValueError("Invalid observation")
+                    restored[state] = (observation["data"], observed_at)
+                for state, (data, observed_at) in restored.items():
+                    setattr(self, state, data)
+                    self.state_observed_at[state] = observed_at
+                self.charge_state_received_at = self.state_observed_at.get("charge_state")
+            except ValueError, TypeError, KeyError:
+                _LOGGER.warning("Could not restore last-known telemetry; waiting for fresh observations")
         saved_energy = self._store.load("energy")
         if saved_energy is not None:
             try:
@@ -222,6 +253,7 @@ class TeslaBLEManager:
         self._create_vehicle()
         self._key_rejected = self._store.load("key_rejected") == b"1"
         self._sync_pairing()
+        self._update_rssi()
         self._transport.set_notify_callback(self._on_notify)
         self._tick_cancel = async_track_time_interval(self.hass, self._async_tick, TICK_INTERVAL)
         self._stop_cancel = self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_stop)
@@ -381,24 +413,28 @@ class TeslaBLEManager:
         received = self._state_received_at.get(state)
         if received is None or self._stopped:
             return False
-        interval = self.vcsec_poll_interval if state == "vehicle_status" else self._poll_policy.sleep_timeout_ms / 1000
+        if state == "vehicle_status":
+            interval = self.vcsec_poll_interval
+        elif state in INFOTAINMENT_STATES and not self.vehicle_status.get("asleep", False):
+            # An awake car polls infotainment on the awake cadence; a sleeping
+            # car stops by design, so cached groups keep the longer window.
+            interval = self._poll_policy.awake_interval_ms / 1000
+        else:
+            interval = self._poll_policy.sleep_timeout_ms / 1000
         return time.monotonic() - received <= max(120, interval * 2)
 
     def state_available(self, state: str) -> bool:
         """Whether entities should expose this state.
 
         The vehicle status is the reachability signal: while it is fresh the
-        car is at home and can be talked to. A sleeping vehicle stops sending
+        car can be talked to (not proof of location). A sleeping vehicle stops sending
         infotainment data by design, so its last known values stay visible;
-        once the status itself is stale the car is out of range and all
-        telemetry expires.
+        once status itself is stale all telemetry expires. Advertisements
+        alone cannot confirm that the car is still asleep.
         """
-        if self._key_rejected:
+        if self._stopped or self._key_rejected:
             return False
         status_fresh = self.state_fresh("vehicle_status")
-        if not self.polling:
-            # Polling was paused by the user: keep the last known values.
-            return True
         if state == "vehicle_status":
             return status_fresh
         if not status_fresh:
@@ -409,6 +445,17 @@ class TeslaBLEManager:
 
     def _received_state(self, state: str) -> None:
         self._state_received_at[state] = time.monotonic()
+        self.state_observed_at[state] = dt_util.utcnow()
+        # Restore observations, never monotonic freshness or Bluetooth reachability.
+        self._store.save(
+            "telemetry",
+            json.dumps(
+                {
+                    key: {"observed_at": observed_at.isoformat(), "data": getattr(self, key)}
+                    for key, observed_at in self.state_observed_at.items()
+                }
+            ).encode(),
+        )
         self._sync_pairing()
         self._notify()
 
@@ -519,19 +566,14 @@ class TeslaBLEManager:
         if power is None:
             return
         now = time.monotonic()
-        charging = state.get("charging_state") in CHARGING_ACTIVE_STATES
         if self._ac_energy_last_power is not None:
             elapsed = now - self._ac_energy_last_time
             if elapsed > 0:
-                if not (self._ac_energy_charging and charging):
-                    # Charging may have stopped while unobserved; trust only the start of the gap.
-                    elapsed = min(elapsed, AC_ENERGY_MAX_GAP_SECONDS)
-                area = (self._ac_energy_last_power + power) / 2 * elapsed / 3_600_000
+                area = (self._ac_energy_last_power + power) / 2 * min(elapsed, AC_ENERGY_MAX_GAP_SECONDS) / 3_600_000
                 self.ac_energy_total = round(self.ac_energy_total + area, 4)
                 self._save_ac_energy()
         self._ac_energy_last_power = power
         self._ac_energy_last_time = now
-        self._ac_energy_charging = charging
 
     def _save_ac_energy(self) -> None:
         self._store.save("energy_ac", json.dumps({"total": self.ac_energy_total}).encode())

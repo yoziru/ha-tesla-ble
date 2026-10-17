@@ -11,6 +11,7 @@ import asyncio
 import base64
 import gc
 import hashlib
+import json
 import time
 import weakref
 from datetime import timedelta
@@ -618,28 +619,140 @@ async def test_monotonic_wrap_and_stale_telemetry(hass, sim, monkeypatch, hass_s
     assert er.async_get(hass).async_get(pair_id).disabled_by == er.RegistryEntryDisabler.INTEGRATION
 
 
-async def test_asleep_vehicle_keeps_last_known_values(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
-    """Infotainment values stay visible while the car sleeps; unreachable expires them."""
+@pytest.mark.parametrize("asleep", [False, True])
+@pytest.mark.parametrize("status_fresh", [False, True])
+@pytest.mark.parametrize("polling", [False, True])
+async def test_sleep_and_reachability_availability(hass, sim, monkeypatch, hass_storage, asleep, status_fresh, polling):
+    """Every live data group follows the matrix; local meters and diagnostics do not."""
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     await settle_until(hass, lambda: bool(manager.charge_state))
     assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "55"
 
-    # The vehicle falls asleep: infotainment data stops, VCSEC keeps polling.
-    manager.vehicle_status = {**manager.vehicle_status, "asleep": True}
-    stale = manager._poll_policy.sleep_timeout_ms / 1000 * 2 + 60
-    manager._state_received_at["charge_state"] = time.monotonic() - stale
-    manager._state_received_at["vehicle_status"] = time.monotonic()
+    # One representative entity per vehicle data group.
+    groups = {
+        "charge_state": ("sensor", f"{VIN}_sensor_battery_level"),
+        "climate_state": ("sensor", f"{VIN}_sensor_outside_temp"),
+        "closures_state": ("switch", f"{VIN}_switch_sentry_mode"),
+        "drive_state": ("sensor", f"{VIN}_sensor_odometer"),
+        "software_update_state": ("update", f"{VIN}_update_software_update"),
+        "tire_pressure_state": ("sensor", f"{VIN}_sensor_tpms_front_left"),
+    }
+    for state in groups:
+        manager._state_received_at[state] = time.monotonic() - 3600
+    manager.vehicle_status = {**manager.vehicle_status, "asleep": asleep}
+    manager.polling = polling
+    manager._state_received_at["vehicle_status"] = time.monotonic() - (0 if status_fresh else 3600)
+    manager.rssi = None
     manager._notify()
 
-    assert manager.state_fresh("charge_state") is False
-    assert manager.state_available("charge_state") is True
-    assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "55"
+    kept = asleep and status_fresh
+    assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == ("55" if kept else "unavailable")
+    assert state_of(hass, "binary_sensor", f"{VIN}_binary_asleep") == (
+        ("on" if asleep else "off") if status_fresh else "unavailable"
+    )
+    assert state_of(hass, "button", f"{VIN}_button_wake") == ("unknown" if status_fresh else "unavailable")
+    for state, (domain, unique_id) in groups.items():
+        assert (state_of(hass, domain, unique_id) == "unavailable") is not kept, state
 
-    # Once the vehicle status is stale as well it is unreachable: expire.
-    manager._state_received_at["vehicle_status"] = time.monotonic() - 3600
-    manager._notify()
+    # Local meters, the Bluetooth link, and presence are not car telemetry.
+    for domain, unique_id in (
+        ("sensor", f"{VIN}_sensor_charge_energy"),
+        ("binary_sensor", f"{VIN}_binary_connection"),
+        ("device_tracker", f"{VIN}_tracker"),
+    ):
+        assert state_of(hass, domain, unique_id) != "unavailable"
+
+
+async def test_cached_telemetry_survives_reload_without_restoring_reachability(hass, sim, monkeypatch, hass_storage):
+    """Cached readings come back after a restart without pretending the car is reachable."""
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
     assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "unavailable"
+    await settle_until(
+        hass, lambda: manager.charge_state and manager.drive_state and manager._vehicle.pending_command_count == 0
+    )
+    await manager.async_set_polling(False)
+
+    manager._on_charge_state({**manager.charge_state, "minutes_to_full_charge": 60})
+    completion = state_of(hass, "sensor", f"{VIN}_sensor_minutes_to_full_charge")
+    assert completion != "unknown"
+
+    sim.set_battery_level(51)
+    sim.set_sleeping(True)
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    manager = entry.runtime_data
+    assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "unavailable"
+
+    await manager.async_set_polling(True)
+    await settle_until(
+        hass,
+        lambda: (
+            state_of(hass, "binary_sensor", f"{VIN}_binary_asleep") == "on"
+            and manager._vehicle.pending_command_count == 0
+        ),
+    )
+    # Status confirms sleep without waking the car or refreshing cached values.
+    assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "55"
+    assert state_of(hass, "sensor", f"{VIN}_sensor_minutes_to_full_charge") == completion
+    assert distance_in_miles(hass, "sensor", f"{VIN}_sensor_odometer") == pytest.approx(1234.5, abs=0.1)
+    assert distance_in_miles(hass, "sensor", f"{VIN}_sensor_battery_range") == pytest.approx(210.5)
+
+    sim.set_sleeping(False)
+    await manager.async_force_update()
+    await settle_until(hass, lambda: state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "51")
+
+
+@pytest.mark.parametrize(
+    "observation",
+    [
+        {"data": [], "observed_at": "2026-10-17T00:00:00+00:00"},
+        {"data": {"battery_level": 55}, "observed_at": "not-a-timestamp"},
+    ],
+    ids=["invalid-data", "invalid-timestamp"],
+)
+async def test_corrupt_telemetry_does_not_block_setup(hass, sim, monkeypatch, hass_storage, observation):
+    """Bad cached readings are discarded; fresh telemetry still recovers normally."""
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    await entry.runtime_data.async_set_polling(False)
+    entry.runtime_data._store.save("telemetry", json.dumps({"charge_state": observation}).encode())
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "unavailable"
+    await entry.runtime_data.async_set_polling(True)
+    await settle_until(hass, lambda: state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "55")
+
+
+async def test_telemetry_collects_while_sensor_disabled(hass, sim, monkeypatch, hass_storage):
+    """Disabling the entity must not stop collection; re-enabling shows the reading received meanwhile."""
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: manager.charge_state and manager._vehicle.pending_command_count == 0)
+    await manager.async_set_polling(False)
+    registry = er.async_get(hass)
+    battery_id = registry.async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_battery_level")
+
+    registry.async_update_entity(battery_id, disabled_by=er.RegistryEntryDisabler.USER)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert hass.states.get(battery_id) is None
+    manager = entry.runtime_data
+    sim.set_battery_level(51)
+    await manager.async_force_update()
+    await settle_until(
+        hass, lambda: manager.charge_state.get("battery_level") == 51 and manager._vehicle.pending_command_count == 0
+    )
+    sim.set_battery_level(49)  # Never received: the car sleeps before the next poll.
+    sim.set_sleeping(True)
+    registry.async_update_entity(battery_id, disabled_by=None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "unavailable"
+    await entry.runtime_data.async_set_polling(True)
+    await settle_until(hass, lambda: state_of(hass, "binary_sensor", f"{VIN}_binary_asleep") == "on")
+    assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "51"
 
 
 async def test_presence_tracker_follows_reachability(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
@@ -756,6 +869,32 @@ async def test_fleet_style_entities_and_attributes(hass, sim, monkeypatch, hass_
     assert windows.attributes["Driver Rear"] == "Unknown"
     manager._on_closures_state({"window_open_driver_front": True})
     assert hass.states.get(windows_id).state == "open"
+
+
+@pytest.mark.parametrize(
+    ("raw", "doors", "trunk"),
+    [
+        (0, "off", "closed"),
+        (1, "on", "open"),
+        (2, "on", "open"),
+        (5, "on", "open"),
+        (6, "off", "closed"),
+        (3, "unknown", "unknown"),
+        (4, "unknown", "unknown"),
+    ],
+    ids=["closed", "open", "ajar", "opening", "closing", "unknown", "failed-unlatch"],
+)
+async def test_closure_states_never_read_unknown_as_closed(hass, sim, monkeypatch, hass_storage, raw, doors, trunk):
+    """Only known VCSEC closure tags map to open/closed; others stay unknown."""
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    doors_raw = {
+        key: raw for key in ("front_driver_door", "rear_driver_door", "front_passenger_door", "rear_passenger_door")
+    }
+    manager._on_vehicle_status({"closures_raw": {**doors_raw, "rear_trunk": raw}})
+
+    assert state_of(hass, "binary_sensor", f"{VIN}_binary_doors") == doors
+    assert state_of(hass, "cover", f"{VIN}_cover_trunk") == trunk
 
 
 async def test_software_update_entity(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
@@ -876,6 +1015,7 @@ async def test_energy_accumulates_observed_sessions_and_survives_reload(hass, si
         manager._on_charge_state({"charge_energy_added": value})
     assert float(hass.states.get(energy_id).state) == 4.25
     assert hass.states.get(energy_id).attributes["session_energy_kwh"] == 2.25
+    manager._on_vehicle_status({"asleep": False})
     manager._on_charge_state({"charger_voltage": 231, "charger_actual_current": 8, "charger_phases": 3})
     power_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_charger_power")
     assert float(hass.states.get(power_id).state) == 5544
@@ -897,7 +1037,7 @@ async def test_energy_meter_revisions_are_not_new_sessions(hass, sim, monkeypatc
 
 
 async def test_ac_energy_integrates_power_and_survives_reload(hass, sim, monkeypatch, hass_storage):
-    """AC energy integrates power samples; gaps where charging may have stopped are capped."""
+    """AC energy integrates power samples; only the start of any gap is trusted."""
     entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     await manager.async_set_polling(False)
@@ -907,20 +1047,20 @@ async def test_ac_energy_integrates_power_and_survives_reload(hass, sim, monkeyp
     manager.ac_energy_total = 0.0
     manager._ac_energy_last_power = None
     manager._ac_energy_last_time = 0.0
-    manager._ac_energy_charging = False
     energy_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_charge_energy")
     charging = {"charger_voltage": 230, "charger_actual_current": 10, "charger_phases": 1, "charging_state": "Charging"}
     manager._on_charge_state(charging)
     assert float(hass.states.get(energy_id).state) == 0
     clock.value += 600
     manager._on_charge_state(charging)
-    assert float(hass.states.get(energy_id).state) == pytest.approx(0.3833, abs=0.001)
+    # Both samples report charging, but the gap is longer than the trusted window.
+    assert float(hass.states.get(energy_id).state) == pytest.approx(2.3 * 300 / 3600, abs=0.001)
     clock.value += 3600
     manager._on_charge_state(dict(charging, charging_state="Complete"))
-    assert float(hass.states.get(energy_id).state) == pytest.approx(0.3833 + 2.3 * 300 / 3600, abs=0.001)
+    assert float(hass.states.get(energy_id).state) == pytest.approx(2 * 2.3 * 300 / 3600, abs=0.001)
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
-    assert float(hass.states.get(energy_id).state) == pytest.approx(0.575, abs=0.01)
+    assert float(hass.states.get(energy_id).state) == pytest.approx(2 * 2.3 * 300 / 3600, abs=0.01)
 
 
 @pytest.mark.parametrize("sleeping", [False, True])
@@ -1090,7 +1230,7 @@ async def test_optional_controls_detect_capabilities_and_follow_reported_state(h
     await hass.async_block_till_done(wait_background_tasks=True)
     assert remembered <= entry.runtime_data.capabilities
     assert registry.async_get_entity_id("select", DOMAIN, f"{VIN}_select_seat_climate_left") == heat_id
-    assert hass.states.get(heat_id).state == "unknown"
+    assert hass.states.get(heat_id).state == "unavailable"
 
 
 def test_software_update_release_url():

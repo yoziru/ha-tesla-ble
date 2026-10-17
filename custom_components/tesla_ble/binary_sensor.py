@@ -36,9 +36,16 @@ def _charger_connected(manager: TeslaBLEManager) -> bool | None:
     return None if raw is None else tesla_ble.charger_connected_tag(raw)
 
 
+# VCSEC closure tags: 0 closed, 1 open, 2 ajar, 5 opening, 6 closing.
+# Unknown (3) and failed-unlatch (4) must never read as closed.
+CLOSURE_TAGS = (0, 1, 2, 5, 6)
+
+
 def _closure(manager: TeslaBLEManager, key: str) -> bool | None:
     raw = manager.vehicle_status.get("closures_raw", {}).get(key)
-    return None if raw is None else tesla_ble.closure_is_open(raw)
+    if raw not in CLOSURE_TAGS:
+        return None
+    return tesla_ble.closure_is_open(raw)
 
 
 def _window(manager: TeslaBLEManager, key: str) -> bool | None:

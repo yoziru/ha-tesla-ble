@@ -93,7 +93,7 @@ class TeslaSentryModeSwitch(TeslaBLEEntity, SwitchEntity):
 
 
 class TeslaPollingSwitch(TeslaBLEEntity, SwitchEntity):
-    """Pause polling (e.g. to let the vehicle sleep); entities keep last values."""
+    """Pause automatic polling without changing telemetry freshness."""
 
     _attr_translation_key = "polling"
     _attr_entity_category = EntityCategory.DIAGNOSTIC

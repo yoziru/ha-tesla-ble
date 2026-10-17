@@ -28,7 +28,15 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class TeslaWakeButton(TeslaBLEEntity, ButtonEntity):
+class TeslaVehicleButton(TeslaBLEEntity, ButtonEntity):
+    """Actions need a reachable vehicle; local configuration and pairing do not."""
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.manager.reachable and not self.manager._key_rejected
+
+
+class TeslaWakeButton(TeslaVehicleButton):
     _attr_translation_key = "wake"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -53,7 +61,7 @@ class TeslaPairButton(TeslaBLEEntity, ButtonEntity):
         await self.manager.async_pair()
 
 
-class TeslaForceUpdateButton(TeslaBLEEntity, ButtonEntity):
+class TeslaForceUpdateButton(TeslaVehicleButton):
     _attr_translation_key = "force_update"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -66,7 +74,7 @@ class TeslaForceUpdateButton(TeslaBLEEntity, ButtonEntity):
         await self.manager.async_force_update()
 
 
-class TeslaFlashLightsButton(TeslaBLEEntity, ButtonEntity):
+class TeslaFlashLightsButton(TeslaVehicleButton):
     _attr_translation_key = "flash_lights"
 
     def __init__(self, manager: TeslaBLEManager) -> None:
@@ -76,7 +84,7 @@ class TeslaFlashLightsButton(TeslaBLEEntity, ButtonEntity):
         await self.manager.async_flash_lights()
 
 
-class TeslaHonkHornButton(TeslaBLEEntity, ButtonEntity):
+class TeslaHonkHornButton(TeslaVehicleButton):
     _attr_translation_key = "honk_horn"
 
     def __init__(self, manager: TeslaBLEManager) -> None:
@@ -98,7 +106,7 @@ class TeslaRegenerateKeyButton(TeslaBLEEntity, ButtonEntity):
         await self.manager.async_regenerate_key()
 
 
-class TeslaUnlatchDriverDoorButton(TeslaBLEEntity, ButtonEntity):
+class TeslaUnlatchDriverDoorButton(TeslaVehicleButton):
     _attr_translation_key = "unlatch_driver_door"
     _attr_entity_registry_enabled_default = False
 

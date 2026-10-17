@@ -145,8 +145,7 @@ class TeslaBleTransport:
     def _handle_disconnected(self, client: object) -> None:
         if self._client is None or self._client is not client:
             return
-        if self._client is not None:
-            _LOGGER.debug("Disconnected from %s", self._address)
+        _LOGGER.debug("Disconnected from %s", self._address)
         self._client = None
         self._write_queue.clear()
         self._on_disconnect()

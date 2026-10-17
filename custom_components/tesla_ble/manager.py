@@ -118,7 +118,6 @@ class TeslaBLEManager:
         # Observed state (plain dicts produced by the bindings)
         self.vehicle_status: dict[str, Any] = {}
         self.charge_state: dict[str, Any] = {}
-        self.charge_state_received_at: datetime | None = None
         self.energy_total = 0.0
         self._energy_last_session: float | None = None
         self.energy_tracking_since: str | None = None
@@ -215,7 +214,6 @@ class TeslaBLEManager:
                 for state, (data, observed_at) in restored.items():
                     setattr(self, state, data)
                     self.state_observed_at[state] = observed_at
-                self.charge_state_received_at = self.state_observed_at.get("charge_state")
             except ValueError, TypeError, KeyError:
                 _LOGGER.warning("Could not restore last-known telemetry; waiting for fresh observations")
         saved_energy = self._store.load("energy")
@@ -557,7 +555,6 @@ class TeslaBLEManager:
             self._save_energy()
         self._integrate_ac_energy(state)
         self.charge_state = state
-        self.charge_state_received_at = dt_util.utcnow()
         self._received_state("charge_state")
 
     def _integrate_ac_energy(self, state: dict[str, Any]) -> None:

@@ -110,9 +110,10 @@ def _shift_state_attributes(manager: TeslaBLEManager) -> dict[str, Any] | None:
 
 def _time_charge_complete(manager: TeslaBLEManager) -> datetime | None:
     minutes = manager.charge_state.get("minutes_to_full_charge")
-    if minutes is None or minutes <= 0 or manager.charge_state_received_at is None:
+    observed_at = manager.state_observed_at.get("charge_state")
+    if minutes is None or minutes <= 0 or observed_at is None:
         return None
-    return manager.charge_state_received_at + timedelta(minutes=minutes)
+    return observed_at + timedelta(minutes=minutes)
 
 
 def _steering_heat_mode(manager: TeslaBLEManager) -> str | None:

@@ -167,7 +167,7 @@ def distance_in_miles(hass: HomeAssistant, platform: str, unique_id: str) -> flo
     return value
 
 
-async def test_poll_updates_entities(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_poll_updates_entities(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     manager._next_vcsec_poll = 0
@@ -191,7 +191,7 @@ async def test_poll_updates_entities(hass: HomeAssistant, sim, monkeypatch, hass
     assert manager.connected is True
 
 
-async def test_lock_service_completes(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_lock_service_completes(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     manager._next_vcsec_poll = 0
@@ -209,7 +209,7 @@ async def test_lock_service_completes(hass: HomeAssistant, sim, monkeypatch, has
     assert state_of(hass, "lock", f"{VIN}_lock_doors") == "unlocked"
 
 
-async def test_charging_switch_completes(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_charging_switch_completes(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     sim.set_charging_state(tesla_ble.charging_state_tag("Disconnected"))
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
@@ -223,7 +223,7 @@ async def test_charging_switch_completes(hass: HomeAssistant, sim, monkeypatch, 
     assert state_of(hass, "sensor", f"{VIN}_sensor_last_command") == "Start Charging: ok"
 
 
-async def test_pair_button_persists_key(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_pair_button_persists_key(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     monkeypatch.setattr(
         "custom_components.tesla_ble.button.TeslaPairButton._attr_entity_registry_enabled_default", True
     )
@@ -238,9 +238,7 @@ async def test_pair_button_persists_key(hass: HomeAssistant, sim, monkeypatch, h
 
 
 @pytest.mark.parametrize("sleeping", [False, True])
-async def test_force_update_button(
-    hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth, sleeping
-) -> None:
+async def test_force_update_button(hass: HomeAssistant, sim, monkeypatch, hass_storage, sleeping) -> None:
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     manager._next_vcsec_poll = 0
@@ -286,7 +284,7 @@ async def test_shutdown_disconnects_and_releases_vehicle(hass, sim, monkeypatch,
     assert vehicle_ref() is None
 
 
-async def test_wedged_link_is_cycled(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_wedged_link_is_cycled(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     """If the library resets its session while GATT stays up, cycle the link."""
     entry, client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
@@ -301,7 +299,7 @@ async def test_wedged_link_is_cycled(hass: HomeAssistant, sim, monkeypatch, hass
     assert client.is_connected is False
 
 
-async def test_pairing_issue_when_no_key(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_pairing_issue_when_no_key(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     monkeypatch.setattr(
         "custom_components.tesla_ble.button.TeslaPairButton._attr_entity_registry_enabled_default", True
     )
@@ -325,7 +323,7 @@ async def test_pairing_issue_when_no_key(hass: HomeAssistant, sim, monkeypatch, 
     assert registry.async_get_issue(DOMAIN, issue_id) is None
 
 
-async def test_no_pairing_issue_with_key(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_no_pairing_issue_with_key(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     from homeassistant.helpers import issue_registry as ir
 
     from custom_components.tesla_ble.const import ISSUE_PAIRING_REQUIRED
@@ -336,9 +334,7 @@ async def test_no_pairing_issue_with_key(hass: HomeAssistant, sim, monkeypatch, 
 
 
 @pytest.mark.parametrize("role", [None, "DRIVER", "CHARGING_MANAGER", "VEHICLE_MONITOR"])
-async def test_setup_pairs_automatically(
-    hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth, role
-) -> None:
+async def test_setup_pairs_automatically(hass: HomeAssistant, sim, monkeypatch, hass_storage, role) -> None:
     """The pairing step of onboarding hands off to a single automatic attempt."""
     from homeassistant.components import persistent_notification
 
@@ -376,9 +372,7 @@ async def test_setup_pairs_automatically(
     assert requested_roles == [expected, expected]
 
 
-async def test_setup_pairing_reports_unreachable_vehicle(
-    hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth
-) -> None:
+async def test_setup_pairing_reports_unreachable_vehicle(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     from homeassistant.components import persistent_notification
 
     notifications: list[str] = []
@@ -403,7 +397,7 @@ VIN2 = "5YJ30123456789DEF"
 ADDRESS2 = "11:22:33:44:55:66"
 
 
-async def test_climate_entity(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_climate_entity(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     sim.set_inside_temp(21.0)
     sim.set_climate_on(True)
     sim.set_climate_keeper_mode(4)  # Dog Mode
@@ -461,7 +455,7 @@ async def test_climate_entity(hass: HomeAssistant, sim, monkeypatch, hass_storag
     assert manager.last_command == "Climate Keeper Off: ok"
 
 
-async def test_parity_entities(hass: HomeAssistant, sim, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_parity_entities(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     """ESPhome parity: charging diagnostics, parking brake, sentry, latch."""
     sim.set_charger_pilot_current(16)
     sim.set_charger_phases(3)
@@ -493,7 +487,7 @@ async def test_parity_entities(hass: HomeAssistant, sim, monkeypatch, hass_stora
     assert registry.async_get_entity_id("button", DOMAIN, f"{VIN}_button_regenerate_key")
 
 
-async def test_multiple_vehicles(hass: HomeAssistant, monkeypatch, hass_storage, enable_bluetooth) -> None:
+async def test_multiple_vehicles(hass: HomeAssistant, monkeypatch, hass_storage) -> None:
     """Two vehicles coexist: separate connections, devices and entities."""
     sim1 = tesla_ble.SimulatedVehicle(VIN)
     sim1.set_battery_level(55)
@@ -755,7 +749,7 @@ async def test_telemetry_collects_while_sensor_disabled(hass, sim, monkeypatch, 
     assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "51"
 
 
-async def test_presence_tracker_follows_reachability(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
+async def test_presence_tracker_follows_reachability(hass, sim, monkeypatch, hass_storage):
     """Departure mid-frame cancels the control; return refreshes without replay."""
     entry, client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
@@ -808,7 +802,7 @@ async def test_presence_tracker_follows_reachability(hass, sim, monkeypatch, has
     assert manager._store.load("private_key") == key and manager.paired
 
 
-async def test_number_limits_follow_vehicle(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
+async def test_number_limits_follow_vehicle(hass, sim, monkeypatch, hass_storage):
     """Both number ranges come from the vehicle, not from a config option."""
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
@@ -833,7 +827,7 @@ async def test_number_limits_follow_vehicle(hass, sim, monkeypatch, hass_storage
     assert amps.attributes["max"] == 16
 
 
-async def test_fleet_style_entities_and_attributes(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
+async def test_fleet_style_entities_and_attributes(hass, sim, monkeypatch, hass_storage):
     """Aggregate sensors and grouped attributes mirror the fleet integration."""
     sim.set_charger_voltage(230)
     sim.set_charger_actual_current(10)
@@ -897,7 +891,7 @@ async def test_closure_states_never_read_unknown_as_closed(hass, sim, monkeypatc
     assert state_of(hass, "cover", f"{VIN}_cover_trunk") == trunk
 
 
-async def test_software_update_entity(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
+async def test_software_update_entity(hass, sim, monkeypatch, hass_storage):
     """The update entity reports availability without inventing firmware versions."""
     sim.set_software_update_state(4)  # Available
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
@@ -1136,7 +1130,10 @@ async def test_charge_completion_time_is_anchored_to_telemetry(hass, sim, monkey
     state = dict(manager.charge_state, minutes_to_full_charge=60)
     manager._on_charge_state(state)
     initial = state_of(hass, "sensor", f"{VIN}_sensor_minutes_to_full_charge")
-    assert initial == (manager.charge_state_received_at + timedelta(minutes=60)).replace(microsecond=0).isoformat()
+    assert (
+        initial
+        == (manager.state_observed_at["charge_state"] + timedelta(minutes=60)).replace(microsecond=0).isoformat()
+    )
     later = dt_util.utcnow() + timedelta(minutes=10)
     with monkeypatch.context() as patches:
         patches.setattr(dt_util, "utcnow", lambda: later)
@@ -1248,7 +1245,7 @@ def test_software_update_release_url():
     assert entity.release_url is None
 
 
-async def test_software_update_install_and_cancel(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
+async def test_software_update_install_and_cancel(hass, sim, monkeypatch, hass_storage):
     """One update entity owns installation and cancellation, with state guards."""
     sim.set_software_update_state(4)  # Available
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
@@ -1276,7 +1273,7 @@ async def test_software_update_install_and_cancel(hass, sim, monkeypatch, hass_s
         await manager.async_install_software_update()
 
 
-async def test_polling_switch_pauses_and_persists(hass, sim, monkeypatch, hass_storage, enable_bluetooth):
+async def test_polling_switch_pauses_and_persists(hass, sim, monkeypatch, hass_storage):
     """The polling switch pauses polling, keeps values and survives a reload."""
     entry, _client = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 import re
 import time
 from typing import Any
@@ -47,8 +46,6 @@ from .const import (
     TESLA_BEACON_DATA_PREFIX,
     TESLA_BEACON_MANUFACTURER_ID,
 )
-
-_LOGGER = logging.getLogger(__name__)
 
 VIN_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
 MAC_RE = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")

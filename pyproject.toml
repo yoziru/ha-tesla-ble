@@ -9,7 +9,7 @@ license = "AGPL-3.0-only"
 dev = [
     "pytest-homeassistant-custom-component==0.13.371",
     "bleak-retry-connector>=4.7.1",
-    "tesla-ble==6.1.1",
+    "tesla-ble==6.2.0",
     "ruff>=0.14",
     "mypy>=2.4",
     # The bluetooth test fixtures import HA's usb component, which imports

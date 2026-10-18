@@ -17,7 +17,7 @@ dev = [
     # integration manifests; dbus-fast is normally Linux-only via markers,
     # but the macOS test path loads adapter history through it too.
     "aiousbwatcher==1.1.2",
-    "serialx==1.11.0",
+    "serialx==1.14.0",
     "dbus-fast==5.0.22",
 ]
 

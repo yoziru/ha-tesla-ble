@@ -153,8 +153,9 @@ gets stale.
 
 - Seat controls require climate/preconditioning or Climate Keeper to be on;
   selecting seat heat/cooling does not turn climate on.
-- **Power** is the car's own AC measurement (volts × amps × phases; the reported
-  power is an attribute). **Energy** integrates that AC power, **Energy added** is
+- **Power** uses a phase-aware estimate when available, otherwise reported power.
+  Attributes show raw and inferred phases, the multiplier, source and reported
+  power. **Energy** integrates only identified AC power. **Energy added** is
   the battery-side session total. Neither is a lifetime meter; AC energy is an
   estimate and differs from battery-side energy by charging losses (~5–15%).
 - **Firmware** shows offered updates and their progress. The installed version

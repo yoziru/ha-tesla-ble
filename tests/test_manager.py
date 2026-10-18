@@ -458,9 +458,13 @@ async def test_climate_entity(hass: HomeAssistant, sim, monkeypatch, hass_storag
 async def test_parity_entities(hass: HomeAssistant, sim, monkeypatch, hass_storage) -> None:
     """ESPhome parity: charging diagnostics, parking brake, sentry, latch."""
     sim.set_charger_pilot_current(16)
-    sim.set_charger_phases(3)
-    sim.set_charger_voltage(230)
-    sim.set_charger_actual_current(10)
+    has_estimator = hasattr(sim, "set_fast_charger_present")
+    if has_estimator:
+        sim.set_fast_charger_present(False)
+    sim.set_charger_phases(2)
+    sim.set_charger_voltage(233)
+    sim.set_charger_actual_current(16)
+    sim.set_charger_power(11)
     sim.set_sunroof_percent(50)
     sim.set_sentry_mode_state(3)  # Armed
     sim.set_charge_port_latch(3)  # Engaged
@@ -469,11 +473,17 @@ async def test_parity_entities(hass: HomeAssistant, sim, monkeypatch, hass_stora
     manager = entry.runtime_data
     manager._next_vcsec_poll = 0
     await settle_until(hass, lambda: manager.charge_state and manager.closures_state)
+    for _ in range(3):
+        manager._vehicle.charge_state_poll()
+        await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
 
     power_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_charger_power")
     assert hass.states.get(power_id).attributes["charger_max_current"] == 16
-    assert hass.states.get(power_id).attributes["charger_phases"] == 3
-    assert state_of(hass, "sensor", f"{VIN}_sensor_charger_power") == "6900"
+    assert hass.states.get(power_id).attributes["charger_phases"] == 2
+    assert hass.states.get(power_id).attributes["reported_power_w"] == 11000
+    assert float(hass.states.get(power_id).state) == (11184 if has_estimator else 11000)
+    if has_estimator:
+        assert hass.states.get(power_id).attributes["effective_phases"] == 3
     assert state_of(hass, "binary_sensor", f"{VIN}_binary_parking_brake") == "on"
     assert state_of(hass, "switch", f"{VIN}_switch_sentry_mode") == "on"
     assert state_of(hass, "lock", f"{VIN}_lock_charge_port_latch") == "locked"
@@ -1009,12 +1019,6 @@ async def test_energy_accumulates_observed_sessions_and_survives_reload(hass, si
         manager._on_charge_state({"charge_energy_added": value})
     assert float(hass.states.get(energy_id).state) == 4.25
     assert hass.states.get(energy_id).attributes["session_energy_kwh"] == 2.25
-    manager._on_vehicle_status({"asleep": False})
-    manager._on_charge_state({"charger_voltage": 231, "charger_actual_current": 8, "charger_phases": 3})
-    power_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_charger_power")
-    assert float(hass.states.get(power_id).state) == 5544
-    manager._on_charge_state({"charger_power": 5})
-    assert float(hass.states.get(power_id).state) == 5000
 
 
 async def test_energy_meter_revisions_are_not_new_sessions(hass, sim, monkeypatch, hass_storage):
@@ -1042,7 +1046,7 @@ async def test_ac_energy_integrates_power_and_survives_reload(hass, sim, monkeyp
     manager._ac_energy_last_power = None
     manager._ac_energy_last_time = 0.0
     energy_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_charge_energy")
-    charging = {"charger_voltage": 230, "charger_actual_current": 10, "charger_phases": 1, "charging_state": "Charging"}
+    charging = {"charger_power_w": 2300, "charger_is_ac": True, "charging_state": "Charging"}
     manager._on_charge_state(charging)
     assert float(hass.states.get(energy_id).state) == 0
     clock.value += 600
@@ -1055,6 +1059,41 @@ async def test_ac_energy_integrates_power_and_survives_reload(hass, sim, monkeyp
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
     assert float(hass.states.get(energy_id).state) == pytest.approx(2 * 2.3 * 300 / 3600, abs=0.01)
+
+
+@pytest.mark.parametrize(
+    "interruption",
+    [
+        {"charger_power_w": 80000, "charger_is_ac": False},
+        {"charger_power_w": 11184, "charger_is_ac": None},
+        {"charger_power_w": None, "charger_power": 11, "charger_is_ac": True},
+        {"charger_voltage": 233, "charger_actual_current": 16, "charger_phases": 2, "fast_charger_present": False},
+    ],
+    ids=["dc", "unknown-type", "missing-power", "legacy-missing-power"],
+)
+async def test_ac_energy_does_not_bridge_unobserved_intervals(hass, sim, monkeypatch, hass_storage, interruption):
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await manager.async_set_polling(False)
+    monkeypatch.setattr(manager, "disconnect_delay", 10**9)
+    clock = SimpleNamespace(value=1_000_000.0)
+    monkeypatch.setattr(manager_module, "time", SimpleNamespace(monotonic=lambda: clock.value))
+    manager.ac_energy_total = 0
+    manager._ac_energy_last_power = None
+    state = {"charger_power_w": 11184, "charger_is_ac": True}
+    manager._on_charge_state(state)
+    clock.value += 60
+    manager._on_charge_state(state)
+    assert manager.ac_energy_total == pytest.approx(0.1864)
+    clock.value += 60
+    manager._on_charge_state(interruption)
+    assert manager.ac_energy_total == pytest.approx(0.1864)
+    clock.value += 60
+    manager._on_charge_state(state)
+    assert manager.ac_energy_total == pytest.approx(0.1864)
+    clock.value += 60
+    manager._on_charge_state(state)
+    assert manager.ac_energy_total == pytest.approx(0.3728)
 
 
 @pytest.mark.parametrize("sleeping", [False, True])

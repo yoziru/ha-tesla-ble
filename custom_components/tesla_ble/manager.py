@@ -86,13 +86,11 @@ def monotonic_ms() -> int:
 
 
 def charger_power_w(state: dict[str, Any]) -> float | None:
-    """AC charging power in watts from the car's own voltage/current/phase readings."""
-    voltage = state.get("charger_voltage")
-    current = state.get("charger_actual_current")
-    if voltage is not None and current is not None:
-        return voltage * current * (state.get("charger_phases") or 1)
+    """Return derived watts, or reported watts when derived fields are absent."""
+    if "charger_power_w" in state:
+        return state["charger_power_w"]
     reported = state.get("charger_power")
-    return None if reported is None else reported * 1000
+    return reported * 1000 if isinstance(reported, (int, float)) and math.isfinite(reported) and reported >= 0 else None
 
 
 class TeslaBLEManager:
@@ -560,7 +558,11 @@ class TeslaBLEManager:
     def _integrate_ac_energy(self, state: dict[str, Any]) -> None:
         """Accumulate AC (wall-side) energy from the car's own power measurements."""
         power = charger_power_w(state)
-        if power is None:
+        is_ac = state.get("charger_is_ac")
+        if is_ac is None and "fast_charger_present" in state:
+            is_ac = not state["fast_charger_present"]
+        if power is None or (is_ac is not True and state.get("charger_power_source") != "disconnected"):
+            self._ac_energy_last_power = None
             return
         now = time.monotonic()
         if self._ac_energy_last_power is not None:

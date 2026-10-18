@@ -56,7 +56,7 @@ def _odometer_miles(manager: TeslaBLEManager) -> float | None:
 
 
 def _charger_power(manager: TeslaBLEManager) -> float | None:
-    """AC charging power from the car's voltage/current/phase readings, with a raw fallback."""
+    """Charging power in watts."""
     return charger_power_w(manager.charge_state)
 
 
@@ -94,6 +94,9 @@ def _charger_power_attributes(manager: TeslaBLEManager) -> dict[str, Any] | None
         "charger_amps_actual": state.get("charger_actual_current"),
         "charger_volts": state.get("charger_voltage"),
         "charger_phases": state.get("charger_phases"),
+        "effective_phases": state.get("charger_effective_phases"),
+        "power_multiplier": state.get("charger_power_multiplier"),
+        "power_source": state.get("charger_power_source"),
         "charger_max_current": state.get("charger_pilot_current"),
         "vehicle_max_current": state.get("charge_current_request_max"),
         "reported_power_w": None if state.get("charger_power") is None else state["charger_power"] * 1000,
@@ -430,6 +433,9 @@ class TeslaSensor(TeslaBLEEntity, SensorEntity):
             "charger_amps_actual",
             "charger_volts",
             "charger_phases",
+            "effective_phases",
+            "power_multiplier",
+            "power_source",
             "charger_max_current",
             "vehicle_max_current",
             "reported_power_w",

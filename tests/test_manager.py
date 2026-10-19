@@ -726,6 +726,8 @@ async def test_corrupt_telemetry_does_not_block_setup(hass, sim, monkeypatch, ha
     await hass.async_block_till_done(wait_background_tasks=True)
     assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "unavailable"
     await entry.runtime_data.async_set_polling(True)
+    # Reloading must not bypass the passive probe budget, even for bad caches.
+    await entry.runtime_data.async_force_update()
     await settle_until(hass, lambda: state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "55")
 
 
@@ -1103,19 +1105,30 @@ async def test_return_home_refreshes_without_waiting_or_waking(
 ):
     from homeassistant.components import bluetooth
 
+    sim.set_charging_state(tesla_ble.charging_state_tag("Stopped"))
     entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
     manager = entry.runtime_data
     await settle_until(hass, lambda: bool(manager.charge_state) and manager._vehicle.pending_command_count == 0)
     manager.polling = False
     if reconnect:
         await manager._async_disconnect()
+    clock = SimpleNamespace(value=time.monotonic() + 1000)
+    monkeypatch.setattr(manager_module, "time", SimpleNamespace(monotonic=lambda: clock.value))
+    start = clock.value - 1000
+    utcnow = dt_util.utcnow()
+    monkeypatch.setattr(dt_util, "utcnow", lambda: utcnow + timedelta(seconds=clock.value - start))
+    # A proven absence, not a GATT cycle or a startup advertisement.
+    monkeypatch.setattr(bluetooth, "async_last_service_info", lambda *a, **kw: None)
     manager.rssi = None
     manager._state_received_at.clear()
+    manager._update_rssi()
+    clock.value += 600
+    monkeypatch.setattr(
+        bluetooth, "async_last_service_info", lambda *a, **kw: SimpleNamespace(rssi=-64, time=clock.value)
+    )
     sim.set_battery_level(61)
     sim.set_sleeping(sleeping)
     manager._next_vcsec_poll = time.monotonic() + 3600
-    manager._poll_policy.set_awake_interval_ms(3600_000)
-    manager._poll_policy.set_active_interval_ms(3600_000)
     manager._poll_policy.on_poll(manager_module.monotonic_ms())
     manager._connect_blocked_until = time.monotonic() + 3600
     assert not manager.reachable
@@ -1130,11 +1143,158 @@ async def test_return_home_refreshes_without_waiting_or_waking(
     assert manager.state_fresh("vehicle_status")
     assert manager.vehicle_status["asleep"] is sleeping
     assert manager.charge_state["battery_level"] == (55 if sleeping else 61)
+    if sleeping:
+        assert manager.polling_diagnostics["arrival_remaining_seconds"] == 0
+    else:
+        # Production regression: no activity, idle policy already exhausted,
+        # but the bounded arrival window must still refresh beyond 120 seconds.
+        for step in range(1, 6):
+            clock.value += 30
+            sim.set_battery_level(61 + step)
+            manager.polling = True
+            await manager._async_handle_polls()
+            manager.polling = False
+            await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
+            assert manager.charge_state["battery_level"] == 61 + step
+            assert manager.state_available("charge_state")
+        clock.value += 121
+        manager._on_vehicle_status(dict(manager.vehicle_status, asleep=False))
+        assert not manager.state_fresh("charge_state")
+        assert not manager.state_available("charge_state")
+        manager._infotainment_poll_decision(manager_module.monotonic_ms())
+        assert manager.polling_diagnostics["decision"]["effective_interval_seconds"] == 660
+        manager._on_vehicle_status(dict(manager.vehicle_status, asleep=True))
+        assert not manager.state_fresh("charge_state")
+        assert manager.state_available("charge_state")
     manager._next_vcsec_poll = time.monotonic() + 3600
     monkeypatch.setattr(bluetooth, "async_last_service_info", lambda *a, **kw: None)
     manager._state_received_at.clear()
     manager._update_rssi()
     assert not manager.reachable
+
+
+@pytest.mark.parametrize("signal", ["awake", "presence", "door", "driving", "control", "charging", "sentry"])
+async def test_idle_resumption_requires_live_activity(hass, sim, monkeypatch, hass_storage, signal):
+    sim.set_charging_state(tesla_ble.charging_state_tag("Stopped"))
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: bool(manager.charge_state) and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+    clock = SimpleNamespace(value=time.monotonic() + 1000)
+    monkeypatch.setattr(manager_module, "time", SimpleNamespace(monotonic=lambda: clock.value))
+    # Cached/restored values do not count. Only new callbacks can establish activity.
+    manager._on_vehicle_status(dict(manager.vehicle_status, asleep=True))
+    manager._on_vehicle_status(dict(manager.vehicle_status, asleep=False, user_present=signal in ("presence", "door")))
+    if signal == "door":
+        manager._on_vehicle_status(
+            dict(manager.vehicle_status, closures=dict(manager.vehicle_status["closures"], front_driver_door="open"))
+        )
+    if signal == "driving":
+        manager._on_drive_state({"shift_state": "D"})
+    if signal == "charging":
+        manager._on_charge_state({"charging_state": "Charging"})
+    if signal == "sentry":
+        manager._on_closures_state({"sentry_mode_state": 3})
+    if signal == "control":
+        await manager.async_lock_doors(False)
+        await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
+    manager._infotainment_poll_decision(manager_module.monotonic_ms())
+    interval = manager.polling_diagnostics["decision"]["effective_interval_seconds"]
+    assert interval == (660 if signal in ("awake", "presence") else 10 if signal in ("charging", "sentry") else 30)
+    # Ending activity starts a finite idle window, not a permanent fast cadence.
+    manager._on_vehicle_status(dict(manager.vehicle_status, user_present=False))
+    manager._on_drive_state({"shift_state": "P"})
+    manager._on_charge_state({"charging_state": "Stopped"})
+    manager._on_closures_state({"sentry_mode_state": 0})
+    clock.value += 661
+    manager._on_vehicle_status(dict(manager.vehicle_status, asleep=False))
+    manager._infotainment_poll_decision(manager_module.monotonic_ms())
+    assert manager.polling_diagnostics["decision"]["effective_interval_seconds"] == 660
+
+
+async def test_reconnects_adverts_and_reload_do_not_renew_refresh_budget(hass, sim, monkeypatch, hass_storage):
+    sim.set_charging_state(tesla_ble.charging_state_tag("Stopped"))
+    entry, client = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: bool(manager.charge_state) and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+    observed = manager.state_observed_at["charge_state"]
+    for _ in range(3):
+        await manager._async_disconnect()
+        await manager.async_ensure_connected()
+        manager.rssi = None
+        manager._state_received_at.pop("vehicle_status", None)
+        manager._update_rssi()
+        assert not manager._refresh_pending
+        assert manager._arrival_until == 0
+    sim.set_battery_level(91)
+    await manager.async_set_polling(True)
+    await manager._store.async_flush()
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    manager = entry.runtime_data
+    await settle_until(
+        hass, lambda: manager.state_fresh("vehicle_status") and manager._vehicle.pending_command_count == 0
+    )
+    assert manager.charge_state["battery_level"] == 55
+    assert manager.state_observed_at["charge_state"] == observed
+    assert not manager.state_fresh("charge_state")
+    assert manager._arrival_until == 0
+
+
+async def test_partial_arrival_failure_preserves_age_and_bounds_retries(hass, sim, monkeypatch, hass_storage):
+    sim.set_charging_state(tesla_ble.charging_state_tag("Stopped"))
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: bool(manager.climate_state) and manager._vehicle.pending_command_count == 0)
+    manager.polling = False
+    clock = SimpleNamespace(value=time.monotonic() + 1000)
+    monkeypatch.setattr(manager_module, "time", SimpleNamespace(monotonic=lambda: clock.value))
+    manager._arrival_until = clock.value + 180
+    manager._arrival_polls = 0
+    climate_observed = manager.state_observed_at["climate_state"]
+    original_write = manager._ble_adapter.write
+    failed = False
+
+    def fail_climate_once(data):
+        nonlocal failed
+        if not failed and manager.charge_state.get("battery_level") == 61:
+            failed = True
+            return False
+        return original_write(data)
+
+    monkeypatch.setattr(manager._ble_adapter, "write", fail_climate_once)
+    sim.set_battery_level(61)
+    sim.set_outside_temp(19)
+    manager.polling = True
+    await manager._async_handle_polls()
+    manager.polling = False
+    await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
+    assert failed
+    assert manager.charge_state["battery_level"] == 61
+    assert manager.state_observed_at["climate_state"] == climate_observed
+    assert not manager.state_fresh("climate_state")
+    diagnostics = manager.polling_diagnostics
+    assert diagnostics["groups"]["climate_state"]["poll"]["outcome"] == "failed"
+    assert diagnostics["groups"]["charge_state"]["poll"]["outcome"] == "success"
+    assert diagnostics["groups"]["climate_state"]["observation_age_seconds"] is not None
+    for _ in range(5):
+        clock.value += 30
+        manager.polling = True
+        await manager._async_handle_polls()
+        manager.polling = False
+        await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
+    assert manager.climate_state["outside_temp_celsius"] == 19
+    assert manager._arrival_polls == 6
+    assert manager._arrival_until == clock.value + 30
+    clock.value += 30
+    sim.set_battery_level(92)
+    manager.polling = True
+    await manager._async_handle_polls()
+    manager.polling = False
+    await settle_until(hass, lambda: manager._vehicle.pending_command_count == 0)
+    assert manager.charge_state["battery_level"] == 61
+    assert manager.polling_diagnostics["decision"]["effective_interval_seconds"] == 660
 
 
 async def test_automatic_poll_does_not_wake_car_with_stale_awake_telemetry(hass, sim, monkeypatch, hass_storage):

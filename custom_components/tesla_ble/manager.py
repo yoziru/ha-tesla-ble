@@ -69,6 +69,13 @@ AC_ENERGY_MAX_GAP_SECONDS = 300
 # habluetooth must not look like the vehicle is still nearby.
 RSSI_MAX_AGE_SECONDS = 300
 
+# Presence is not activity. A proven return gets a short, non-renewable probe
+# window; reconnects/reloads share a persisted cooldown, even if probes fail.
+ARRIVAL_ABSENCE_SECONDS = 300
+ARRIVAL_WINDOW_SECONDS = 180
+REFRESH_COOLDOWN_SECONDS = 660
+ARRIVAL_MAX_POLLS = 6
+
 # Infotainment data arrives on the current poll cadence; the vehicle status
 # arrives from VCSEC, and update state only refreshes on demand.
 INFOTAINMENT_STATES = (
@@ -79,6 +86,15 @@ INFOTAINMENT_STATES = (
     "tire_pressure_state",
 )
 TELEMETRY_STATES = ("vehicle_status", "software_update_state", *INFOTAINMENT_STATES)
+POLL_STATE_NAMES = {
+    "VCSEC Poll": "vehicle_status",
+    "Charge State Poll": "charge_state",
+    "Climate State Poll": "climate_state",
+    "Drive State Poll": "drive_state",
+    "Closures State Poll": "closures_state",
+    "Tire Pressure Poll": "tire_pressure_state",
+    "Software Update Poll": "software_update_state",
+}
 
 
 def monotonic_ms() -> int:
@@ -151,6 +167,13 @@ class TeslaBLEManager:
         self._stop_cancel: Callable[[], None] | None = None
         self._next_vcsec_poll = 0.0
         self._refresh_pending = False
+        self._unreachable_since: float | None = None
+        self._arrival_until = 0.0
+        self._arrival_polls = 0
+        self._last_genuine_activity: float | None = None
+        self._poll_decision: dict[str, Any] = {}
+        self._poll_attempts: dict[str, dict[str, Any]] = {}
+        self._last_poll_error: str | None = None
         self._pairing_notification_id = f"{DOMAIN}_pairing_{entry.entry_id}"
         self._pairing_pending = False
         self._pairing_tasks: set[asyncio.Task] = set()
@@ -247,6 +270,12 @@ class TeslaBLEManager:
                     "Could not restore Tesla BLE AC energy counter; stored data was preserved"
                 ) from err
         self._create_vehicle()
+        # A reload is not evidence of activity. Start backed off, allowing only
+        # the bounded initial probe until live activity is actually observed.
+        self._poll_policy.update(
+            (monotonic_ms() - self._poll_policy.sleep_timeout_ms - 1) & 0xFFFFFFFF, False, False, False
+        )
+        self._poll_policy.on_poll(monotonic_ms())
         self._key_rejected = self._store.load("key_rejected") == b"1"
         self._sync_pairing()
         self._update_rssi()
@@ -270,6 +299,7 @@ class TeslaBLEManager:
         self._vehicle.set_closures_state_callback(self._on_closures_state)
         self._vehicle.set_software_update_state_callback(self._on_software_update_state)
         self._vehicle.set_key_not_paired_callback(self._on_key_not_paired)
+        self._vehicle.set_poll_result_callback(self._on_poll_result)
 
     def _key_id(self) -> bytes | None:
         key = self._store.load("private_key")
@@ -411,9 +441,9 @@ class TeslaBLEManager:
             return False
         if state == "vehicle_status":
             interval = self.vcsec_poll_interval
-        elif state in INFOTAINMENT_STATES and not self.vehicle_status.get("asleep", False):
-            # An awake car polls infotainment on the awake cadence; a sleeping
-            # car stops by design, so cached groups keep the longer window.
+        elif state in INFOTAINMENT_STATES:
+            # Freshness is an observation contract, not the scheduler's promise.
+            # Idle backoff can intentionally leave awake telemetry unavailable.
             interval = self._poll_policy.awake_interval_ms / 1000
         else:
             interval = self._poll_policy.sleep_timeout_ms / 1000
@@ -530,8 +560,38 @@ class TeslaBLEManager:
     # ------------------------------------------------------------------
 
     def _on_vehicle_status(self, status: dict[str, Any]) -> None:
+        # Presence alone can be a nearby phone. Require a live passenger-door
+        # transition too; restored/first-seen values are not transitions.
+        if (
+            self.state_fresh("vehicle_status")
+            and status.get("user_present") is True
+            and status.get("asleep") is False
+            and any(
+                self.vehicle_status.get("closures", {}).get(door) == "closed"
+                and status.get("closures", {}).get(door) in ("open", "ajar")
+                for door in ("front_driver_door", "front_passenger_door", "rear_driver_door", "rear_passenger_door")
+            )
+        ):
+            self._record_genuine_activity()
         self.vehicle_status = status
+        if status.get("asleep") is True:
+            self._arrival_until = 0.0
         self._received_state("vehicle_status")
+
+    def _record_genuine_activity(self) -> None:
+        """Only live activity or a successful user action buys idle time."""
+        self._last_genuine_activity = time.monotonic()
+        self._poll_policy.reset()
+
+    def _on_poll_result(self, name: str, result: tesla_ble.CommandResult) -> None:
+        if state := POLL_STATE_NAMES.get(name):
+            attempt = self._poll_attempts.setdefault(state, {})
+            attempt.update(
+                outcome=result.outcome,
+                reason=result.terminal_reason,
+                error=result.error_message,
+                completed_at=dt_util.utcnow().isoformat(),
+            )
 
     def _on_charge_state(self, state: dict[str, Any]) -> None:
         session_energy = state.get("charge_energy_added")
@@ -596,6 +656,8 @@ class TeslaBLEManager:
 
     def _on_drive_state(self, state: dict[str, Any]) -> None:
         self.drive_state = state
+        if state.get("shift_state") in ("D", "R", "N"):
+            self._record_genuine_activity()
         self._received_state("drive_state")
 
     def _on_tire_pressure_state(self, state: dict[str, Any]) -> None:
@@ -674,7 +736,7 @@ class TeslaBLEManager:
         self._last_activity = time.monotonic()
         self._connect_blocked_until = 0.0
         self._next_vcsec_poll = 0.0
-        self._refresh_pending = True
+        self._request_passive_refresh(False)
         self._notify()
 
     async def _async_disconnect(self) -> None:
@@ -730,11 +792,62 @@ class TeslaBLEManager:
         rssi = info.rssi if info is not None else None
         if rssi != self.rssi:
             self.rssi = rssi
-            if not was_reachable and self.reachable:
-                self._refresh_pending = True
+            self._notify()
+        now = time.monotonic()
+        if not self.reachable:
+            if self._unreachable_since is None:
+                self._unreachable_since = now
+        else:
+            if not was_reachable or self._unreachable_since is not None:
+                absent = self._unreachable_since
+                self._request_passive_refresh(absent is not None and now - absent >= ARRIVAL_ABSENCE_SECONDS)
                 self._next_vcsec_poll = 0.0
                 self._connect_blocked_until = 0.0
-            self._notify()
+            self._unreachable_since = None
+
+    def _request_passive_refresh(self, arrival: bool) -> None:
+        """Coalesce adverts/links; persist the budget so reloads cannot renew it."""
+        saved = self._store.load("passive_refresh_at")
+        try:
+            last = dt_util.parse_datetime(saved.decode()) if saved else None
+            elapsed = (dt_util.utcnow() - last).total_seconds() if last else None
+        except ValueError, TypeError, UnicodeError:
+            elapsed = None
+        if elapsed is not None and 0 <= elapsed < REFRESH_COOLDOWN_SECONDS:
+            return
+        self._store.save("passive_refresh_at", dt_util.utcnow().isoformat().encode())
+        self._refresh_pending = True
+        if arrival:
+            self._arrival_until = time.monotonic() + ARRIVAL_WINDOW_SECONDS
+            self._arrival_polls = 0
+
+    @property
+    def polling_diagnostics(self) -> dict[str, Any]:
+        """Do not confuse a queued request, a cached value and an observation."""
+        now = time.monotonic()
+        utcnow = dt_util.utcnow()
+        return {
+            "decision": self._poll_decision,
+            "arrival_remaining_seconds": max(0, self._arrival_until - now),
+            "arrival_polls": self._arrival_polls,
+            "genuine_activity_age_seconds": (
+                now - self._last_genuine_activity if self._last_genuine_activity is not None else None
+            ),
+            "last_error": self._last_poll_error,
+            "groups": {
+                state: {
+                    "observation_age_seconds": (
+                        max(0, (utcnow - self.state_observed_at[state]).total_seconds())
+                        if state in self.state_observed_at
+                        else None
+                    ),
+                    "fresh": self.state_fresh(state),
+                    "available": self.state_available(state),
+                    "poll": self._poll_attempts.get(state),
+                }
+                for state in TELEMETRY_STATES
+            },
+        }
 
     def _infotainment_poll_decision(self, now_ms: int) -> dict[str, Any]:
         is_asleep = self.state_fresh("vehicle_status") and bool(self.vehicle_status.get("asleep", False))
@@ -744,7 +857,20 @@ class TeslaBLEManager:
         is_sentry = self.state_fresh("closures_state") and tesla_ble.sentry_mode_active(
             self.closures_state.get("sentry_mode_state", 0)
         )
-        return self._poll_policy.update(now_ms, is_asleep, is_charging, is_sentry)
+        decision = self._poll_policy.update(now_ms, is_asleep, is_charging, is_sentry)
+        arrival = time.monotonic() < self._arrival_until and self._arrival_polls < ARRIVAL_MAX_POLLS
+        if arrival and not is_asleep:
+            decision["interval_ms"] = min(decision["interval_ms"], self._poll_policy.awake_interval_ms)
+        self._poll_decision = {
+            "effective_interval_seconds": decision["interval_ms"] / 1000,
+            "idle_backoff": decision["wake_policy"] == tesla_ble.WakePolicy.NO_WAKE_SKIP and not is_asleep,
+            "asleep": is_asleep,
+            "charging": is_charging,
+            "sentry": is_sentry,
+            "arrival_window": arrival and not is_asleep,
+            "automatic_wake_policy": "NO_WAKE_SKIP",
+        }
+        return decision
 
     async def _async_handle_polls(self) -> None:
         if not self.polling or self._key_rejected or self._vehicle.pending_command_count:
@@ -762,15 +888,21 @@ class TeslaBLEManager:
                 await self._async_ensure_connected()
             except HomeAssistantError:
                 # Back off; try again on a later tick.
+                self._last_poll_error = "connect_failed"
                 self._next_vcsec_poll = now + CONNECT_RETRY_BACKOFF.total_seconds()
                 return
 
         if vcsec_due or self._refresh_pending:
+            self._poll_attempts["vehicle_status"] = {"outcome": "pending"}
             self._vehicle.vcsec_poll(tesla_ble.WakePolicy.NO_WAKE_SKIP)
             self._next_vcsec_poll = now + self.vcsec_poll_interval
         if infotainment_due or self._refresh_pending:
+            self._last_poll_error = None
+            self._poll_attempts.update({state: {"outcome": "pending"} for state in INFOTAINMENT_STATES})
             self._vehicle.infotainment_poll(tesla_ble.WakePolicy.NO_WAKE_SKIP)
             self._poll_policy.on_poll(now_ms)
+            if now < self._arrival_until:
+                self._arrival_polls += 1
         self._refresh_pending = False
         await self._transport.async_flush()
 
@@ -790,6 +922,8 @@ class TeslaBLEManager:
         def callback(result: tesla_ble.CommandResult) -> None:
             if result.success:
                 text = f"{name}: ok"
+                if name not in ("Pair", "Regenerate Key"):
+                    self._record_genuine_activity()
             elif result.skipped:
                 text = f"{name}: skipped"
             else:
@@ -884,6 +1018,8 @@ class TeslaBLEManager:
             self._vehicle.infotainment_poll(wake_policy)
             self._vehicle.software_update_poll(wake_policy)
             self._poll_policy.on_poll(monotonic_ms())
+            self._refresh_pending = False
+            self._next_vcsec_poll = time.monotonic() + self.vcsec_poll_interval
             if not self.can_wake:
                 self.last_command = "Refresh: requested without waking. Wake the car manually if data stays unchanged."
                 self._notify()

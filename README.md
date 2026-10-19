@@ -125,8 +125,30 @@ and explicit controls can wake the car, except in read-only monitoring mode.
 A sleeping car may show **cached data**, not current
 measurements. When it leaves Bluetooth range, telemetry becomes unavailable
 after about two minutes; **Location** changes to `not_home`.
-Returning to range or reconnecting requests fresh data without waking the car.
+Returning to range or reconnecting can request fresh data without waking the car;
+advertisements and GATT connections are not proof of vehicle activity.
 **Connection** reports the Bluetooth link, not whether the key is authorized.
+
+After at least five minutes of observed absence, a return gets a fixed three-minute
+refresh window (at most six poll batches). Passive refreshes share an eleven-minute
+cooldown, persisted across reloads; link/proxy flapping cannot renew the window.
+A sleeping report ends it. Failed or partial requests do not extend it or trigger
+immediate retries. All automatic telemetry uses `NO_WAKE_SKIP`.
+
+Live occupied-door opening, driving and successful user controls restart normal idle timing;
+phone/user presence alone does not.
+Fresh charging/sentry observations retain the active cadence; old restored values
+do not. Startup starts conservatively, not with a new activity window. Without
+genuine activity, the idle policy eventually returns to the sleep-timeout cadence,
+even if VCSEC still reports `AWAKE`. Charging/sentry changes that occur while backed
+off are discovered on the next successful probe, not inferred from advertisements.
+
+Freshness is separate: idle backoff does not extend infotainment freshness.
+An awake, reachable car can therefore have unavailable old infotainment values.
+A freshly confirmed sleeping car can expose cached values, but that does not make
+them fresh. Downloaded diagnostics include each group's observation age,
+freshness/availability, effective cadence, idle/arrival state and poll outcomes.
+Poll completion and receipt of a new observation remain separate diagnostics.
 
 | Vehicle state | Telemetry |
 | --- | --- |

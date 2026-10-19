@@ -24,6 +24,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: TeslaBL
             },
             "last_command": manager.last_command,
             "configured_key_role": manager.role,
+            "polling": manager.polling_diagnostics,
             "state": {
                 "vehicle_status": manager.vehicle_status,
                 "charge_state": manager.charge_state,

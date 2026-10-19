@@ -50,7 +50,7 @@
     "tesla_ble"
   ],
   "requirements": [
-    "tesla-ble==6.2.0"
+    "tesla-ble==6.3.0"
   ],
   "version": "1.1.6"
 }

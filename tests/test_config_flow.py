@@ -100,6 +100,26 @@ async def test_user_flow_offers_discovered_devices(hass) -> None:
     assert result["errors"] == {CONF_VIN: "name_mismatch"}
 
 
+async def test_user_flow_offers_beacon_only_vehicle(hass) -> None:
+    beacon = bytes.fromhex("021574278bdab64445208f0c720eaf05993501009970c5")
+    discovered = [
+        _discovered(ADDRESS, None, manufacturer_data={76: beacon}),
+        _discovered("11:22:33:44:55:66", None),
+    ]
+    with patch.object(bluetooth, "async_discovered_service_info", return_value=discovered):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["step_id"] == "user"
+    choices = result["data_schema"].schema[next(iter(result["data_schema"].schema))].container
+    assert choices[ADDRESS] == f"Tesla vehicle ({ADDRESS})"
+    assert set(choices) == {ADDRESS, config_flow_module.MANUAL_ADDRESS}
+
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_ADDRESS: ADDRESS})
+    assert result["step_id"] == "vin"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_VIN: VIN})
+    assert result["step_id"] == "role"
+
+
 async def test_bluetooth_discovery_flow(hass, settled_advert) -> None:
     advertised = "S1a87a5a75f3df858C"
     # Derive the VIN whose advertised name this is: use the binding in reverse.

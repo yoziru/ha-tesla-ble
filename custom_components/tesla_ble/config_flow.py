@@ -100,7 +100,7 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
         self._advertised_name: str | None = None
         self._vin: str | None = None
         self._role = "DRIVER"
-        self._discovered: dict[str, str] = {}
+        self._discovered: dict[str, str | None] = {}
 
     async def async_step_bluetooth(self, discovery_info: BluetoothServiceInfoBleak) -> ConfigFlowResult:
         """A Bluetooth advertisement matched a Tesla discovery matcher."""
@@ -147,16 +147,18 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             entry.data.get(CONF_ADDRESS) for entry in self._async_current_entries(include_ignore=False)
         }
         for info in bluetooth.async_discovered_service_info(self.hass):
-            if info.address in configured_addresses or not info.name:
+            if info.address in configured_addresses or not _is_tesla_advert(info):
                 continue
-            if not tesla_ble.is_tesla_vehicle_name(info.name):
-                continue
-            self._discovered[info.address] = info.name
+            # Keep only real Tesla names for the VIN check; beacon-only adverts
+            # still get listed under a generic label.
+            self._discovered[info.address] = info.name if tesla_ble.is_tesla_vehicle_name(info.name or "") else None
 
         if not self._discovered:
             return await self.async_step_manual()
 
-        choices = {address: f"{name} ({address})" for address, name in sorted(self._discovered.items())}
+        choices = {
+            address: f"{name or 'Tesla vehicle'} ({address})" for address, name in sorted(self._discovered.items())
+        }
         choices[MANUAL_ADDRESS] = "Enter Bluetooth address manually"
         return self.async_show_form(
             step_id="user",
@@ -183,18 +185,13 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_vin(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Ask for the VIN and validate it against the advertised name."""
         errors: dict[str, str] = {}
-        placeholders: dict[str, str] = {
-            "expected_name": "",
-            "advertised_name": self._advertised_name or "",
-            "address": self._address or "",
-        }
+        placeholders: dict[str, str] = {"address": self._address or ""}
 
         if user_input is None and self._advertised_name is None and self._address is not None:
             # Look up the currently advertised name for a manual address.
             device = bluetooth.async_ble_device_from_address(self.hass, self._address, connectable=True)
             if device is not None and tesla_ble.is_tesla_vehicle_name(device.name or ""):
                 self._advertised_name = device.name
-                placeholders["advertised_name"] = device.name
 
         if user_input is not None:
             vin = user_input[CONF_VIN].strip().upper()
@@ -206,7 +203,6 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                 for existing in self._async_current_entries(include_ignore=False):
                     if existing.data.get(CONF_ADDRESS) == self._address:
                         return self.async_abort(reason="already_configured")
-                placeholders["expected_name"] = tesla_ble.get_vin_advertisement_name(vin)
                 if self._advertised_name and not tesla_ble.matches_vin(self._advertised_name, vin):
                     errors[CONF_VIN] = "name_mismatch"
                 if not errors:

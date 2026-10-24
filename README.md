@@ -99,7 +99,8 @@ or cancel car updates. Pairing, key regeneration and polling remain available.
 **Configured key access** shows the recorded role, not a vehicle-verified role.
 Older installations predate access levels and are treated as **Vehicle controls**
 (DRIVER); pairing and repair never request OWNER. To change the key's access on
-the car, remove the key from the vehicle and pair again. Removing the integration
+the car, remove the key from the vehicle, delete the integration, then add it
+again and pair. Removing the integration
 also deletes its local keys and Energy counter; it does not revoke the car's key.
 
 ## Daily use

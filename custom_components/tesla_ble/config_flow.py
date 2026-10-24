@@ -93,6 +93,7 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
     _repair_task: asyncio.Task | None = None
 
     VERSION = 1
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         self._address: str | None = None

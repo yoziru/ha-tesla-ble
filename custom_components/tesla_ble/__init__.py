@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
-from .const import TeslaBLEConfigEntry
+from .const import CONF_VIN, TeslaBLEConfigEntry
 from .manager import TeslaBLEManager
 
 PLATFORMS = [
@@ -29,6 +29,23 @@ PLATFORMS = [
 ]
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: TeslaBLEConfigEntry) -> bool:
+    """Migrate the config entry."""
+    if entry.version > 1:
+        return False
+    if entry.minor_version < 2:
+        # The power sensor moved from kW to W; reset a legacy kW override once
+        # so later choices in the entity settings are left alone.
+        registry = er.async_get(hass)
+        power_id = registry.async_get_entity_id("sensor", "tesla_ble", f"{entry.data[CONF_VIN]}_sensor_charger_power")
+        if power_id:
+            power_options = registry.async_get(power_id).options.get("sensor", {})
+            if power_options.get("unit_of_measurement") == "kW":
+                registry.async_update_entity_options(power_id, "sensor", {**power_options, "unit_of_measurement": "W"})
+        hass.config_entries.async_update_entry(entry, minor_version=2)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: TeslaBLEConfigEntry) -> bool:
     manager = TeslaBLEManager(hass, entry)
     try:
@@ -43,10 +60,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaBLEConfigEntry) -> 
         steering_id = registry.async_get_entity_id("switch", "tesla_ble", f"{manager.vin}_switch_steering_wheel_heat")
         if steering_id and registry.async_get(steering_id).disabled_by is None:
             registry.async_update_entity(steering_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION)
-    if power_id := registry.async_get_entity_id("sensor", "tesla_ble", f"{manager.vin}_sensor_charger_power"):
-        power_options = dict(registry.async_get(power_id).options.get("sensor", {}))
-        if power_options.get("unit_of_measurement") == "kW":
-            registry.async_update_entity_options(power_id, "sensor", {**power_options, "unit_of_measurement": "W"})
     for domain, key in (
         ("sensor", "software_update"),
         ("sensor", "charger_power_estimated"),

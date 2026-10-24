@@ -982,7 +982,7 @@ async def test_entity_cleanup_and_defaults_preserve_existing_power_entity(hass, 
     assert registry.async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_software_update") is None
     for key in ("door_driver_front", "window_driver_front"):
         assert registry.async_get_entity_id("binary_sensor", DOMAIN, f"{VIN}_binary_{key}") is None
-    assert hass.states.get(power_id).attributes["unit_of_measurement"] == "W"
+    assert hass.states.get(power_id).attributes["unit_of_measurement"] == "kW"
     for state in hass.states.async_all("sensor"):
         assert state.attributes.get("icon")
     tracker_id = registry.async_get_entity_id("device_tracker", DOMAIN, f"{VIN}_tracker")
@@ -999,6 +999,19 @@ async def test_entity_cleanup_and_defaults_preserve_existing_power_entity(hass, 
     icons = (await async_get_icons(hass, "entity", [DOMAIN]))[DOMAIN]
     assert icons["button"]["wake"]["default"] == "mdi:sleep-off"
     assert icons["lock"]["doors"]["state"]["unlocked"] == "mdi:car-door-lock-open"
+
+
+async def test_power_unit_migration_resets_legacy_kw(hass, sim, monkeypatch, hass_storage):
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    registry = er.async_get(hass)
+    power_id = registry.async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_charger_power")
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    registry.async_update_entity_options(power_id, "sensor", {"unit_of_measurement": "kW"})
+    hass.config_entries.async_update_entry(entry, minor_version=1)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.minor_version == 2
+    assert hass.states.get(power_id).attributes["unit_of_measurement"] == "W"
 
 
 async def test_energy_accumulates_observed_sessions_and_survives_reload(hass, sim, monkeypatch, hass_storage):

@@ -9,6 +9,7 @@ import pytest
 import voluptuous as vol
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.components import bluetooth
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.tesla_ble import config_flow as config_flow_module
 from custom_components.tesla_ble.const import CONF_ADDRESS, CONF_PAIR_ON_SETUP, CONF_ROLE, CONF_VIN, DOMAIN
@@ -16,6 +17,7 @@ from custom_components.tesla_ble.const import CONF_ADDRESS, CONF_PAIR_ON_SETUP, 
 VIN = "5YJ30123456789ABC"
 ADDRESS = "AA:BB:CC:DD:EE:FF"
 ADVERTISED = "S1a87a5a75f3df858C"  # for a different VIN
+BEACON = bytes.fromhex("021574278bdab64445208f0c720eaf05993501009970c5")
 
 
 def _discovered(address: str, name: str | None, **extra) -> SimpleNamespace:
@@ -101,9 +103,8 @@ async def test_user_flow_offers_discovered_devices(hass) -> None:
 
 
 async def test_user_flow_offers_beacon_only_vehicle(hass) -> None:
-    beacon = bytes.fromhex("021574278bdab64445208f0c720eaf05993501009970c5")
     discovered = [
-        _discovered(ADDRESS, None, manufacturer_data={76: beacon}),
+        _discovered(ADDRESS, None, manufacturer_data={76: BEACON}),
         _discovered("11:22:33:44:55:66", None),
     ]
     with patch.object(bluetooth, "async_discovered_service_info", return_value=discovered):
@@ -118,6 +119,32 @@ async def test_user_flow_offers_beacon_only_vehicle(hass) -> None:
     assert result["step_id"] == "vin"
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_VIN: VIN})
     assert result["step_id"] == "role"
+
+
+async def test_user_flow_hides_ignored_vehicle(hass) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_IGNORE},
+        data={"unique_id": ADDRESS, "title": "Ignored Tesla"},
+    )
+    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+
+    MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_VIN: VIN, CONF_ADDRESS: "22:33:44:55:66:77"},
+        unique_id=VIN,
+    ).add_to_hass(hass)
+    discovered = [
+        _discovered(ADDRESS, None, manufacturer_data={76: BEACON}),
+        _discovered("11:22:33:44:55:66", "Tesla 123456"),
+        _discovered("22:33:44:55:66:77", "Tesla 654321"),
+    ]
+    with patch.object(bluetooth, "async_discovered_service_info", return_value=discovered):
+        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert result["step_id"] == "user"
+    choices = result["data_schema"].schema[next(iter(result["data_schema"].schema))].container
+    assert set(choices) == {"11:22:33:44:55:66", config_flow_module.MANUAL_ADDRESS}
+    assert choices["11:22:33:44:55:66"] == "Tesla 123456 (11:22:33:44:55:66)"
 
 
 async def test_bluetooth_discovery_flow(hass, settled_advert) -> None:
@@ -152,7 +179,7 @@ async def test_bluetooth_discovery_accepts_beacon_without_name(hass, settled_adv
     info = _discovered(
         ADDRESS,
         name,
-        manufacturer_data={76: bytes.fromhex("021574278bdab64445208f0c720eaf05993501009970c5")},
+        manufacturer_data={76: BEACON},
     )
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -171,7 +198,6 @@ async def test_bluetooth_discovery_accepts_beacon_without_name(hass, settled_adv
 
 async def test_configured_vehicle_is_not_rediscovered(hass, settled_advert):
     import tesla_ble
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
 
     entry = MockConfigEntry(domain=DOMAIN, data={CONF_VIN: VIN, CONF_ADDRESS: ADDRESS}, unique_id=VIN)
     entry.add_to_hass(hass)

@@ -143,11 +143,14 @@ class TeslaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(address, raise_on_progress=False)
             return await self.async_step_vin()
 
-        configured_addresses = {
-            entry.data.get(CONF_ADDRESS) for entry in self._async_current_entries(include_ignore=False)
+        # Configured entries keep the address in data; a discovery ignored before
+        # VIN entry keeps it in unique_id. Later ignores store the VIN instead.
+        known_addresses = {
+            entry.data.get(CONF_ADDRESS) or entry.unique_id
+            for entry in self._async_current_entries(include_ignore=True)
         }
         for info in bluetooth.async_discovered_service_info(self.hass):
-            if info.address in configured_addresses or not _is_tesla_advert(info):
+            if info.address in known_addresses or not _is_tesla_advert(info):
                 continue
             # Keep only real Tesla names for the VIN check; beacon-only adverts
             # still get listed under a generic label.

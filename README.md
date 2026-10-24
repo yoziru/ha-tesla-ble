@@ -1,6 +1,6 @@
 # Tesla BLE for Home Assistant
 
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://www.hacs.xyz/docs/faq/custom_repositories/)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
 
 Monitor and control your Tesla over Bluetooth—no Tesla cloud account, API token,
 or subscription. Use your Home Assistant host's Bluetooth adapter or a stock
@@ -37,21 +37,20 @@ and API review, not runtime testing on 2026.3.
 
 ## Installation
 
-### HACS
+### HACS / Marketplace
 
-Add this integration as a **custom repository**. HACS requires a public GitHub
-repository; use manual installation if you only have private repository access.
+Tesla BLE is in the default catalog, so no custom repository is needed.
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=yoziru&repository=ha-tesla-ble&category=integration)
 
-1. In HACS, open **⋮ → Custom repositories**.
-2. Add `https://github.com/yoziru/ha-tesla-ble`, category **Integration**.
-3. Download **Tesla BLE**, then restart Home Assistant.
-4. Follow **Setup and pairing** below.
+1. Open **HACS** (Home Assistant 2026.10 or older) or **Settings → Marketplace**
+   (2026.11 or newer), then search for **Tesla BLE**.
+2. Download it, then restart Home Assistant.
+3. Follow **Setup and pairing** below.
 
 ### Manual installation
 
-1. Download a release or source archive using your repository access.
+1. Download the latest release from GitHub.
 2. Copy its `custom_components/tesla_ble` folder to
    `<config>/custom_components/tesla_ble` in Home Assistant.
 3. Restart Home Assistant, then follow setup below.

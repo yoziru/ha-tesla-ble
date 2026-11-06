@@ -7,12 +7,49 @@ proxies both work.
 
 from __future__ import annotations
 
+import logging
+from functools import cache
+
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
+import tesla_ble
+
 from .const import CONF_VIN, TeslaBLEConfigEntry
 from .manager import TeslaBLEManager
+
+_LOGGER = logging.getLogger(__name__)
+_NATIVE_LOGGER = logging.getLogger("tesla_ble")
+
+# C++ LogLevel values (ERROR, WARN, INFO, DEBUG, VERBOSE); the pybind enum is
+# not int-comparable, so the callback's int level is mapped directly.
+_NATIVE_LEVELS = {
+    0: logging.ERROR,
+    1: logging.WARNING,
+    2: logging.INFO,
+    3: logging.DEBUG,
+    4: logging.DEBUG,
+}
+
+
+def _log_native(level: int, message: str, tag: str, line: int) -> None:
+    """Forward a native TeslaBLE log record to Python logging."""
+    _NATIVE_LOGGER.log(_NATIVE_LEVELS.get(level, logging.DEBUG), "%s: %s", tag, message)
+
+
+@cache
+def _install_log_bridge() -> None:
+    """Route the native library's logs through Home Assistant logging, once."""
+    set_callback = getattr(tesla_ble, "set_log_callback", None)
+    if set_callback is None:
+        _LOGGER.warning("tesla-ble cannot route native logs through Home Assistant logging")
+        return
+    try:
+        set_callback(_log_native)
+    except Exception:
+        _LOGGER.warning("Could not route tesla-ble native logs through Home Assistant logging", exc_info=True)
+
 
 PLATFORMS = [
     "binary_sensor",
@@ -47,6 +84,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TeslaBLEConfigEntry) -
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TeslaBLEConfigEntry) -> bool:
+    _install_log_bridge()
     manager = TeslaBLEManager(hass, entry)
     try:
         await manager.async_setup()

@@ -165,16 +165,20 @@ class TeslaCabinProtectionSelect(TeslaBLEEntity, SelectEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
+        attrs = dict(super().extra_state_attributes or {})
         state = self.manager.climate_state
-        return {
-            key: state.get(key)
-            for key in (
-                "allow_cabin_overheat_protection",
-                "supports_fan_only_cabin_overheat_protection",
-                "cabin_overheat_protection_actively_cooling",
-                "cop_not_running_reason",
-            )
-        }
+        attrs.update(
+            {
+                key: state.get(key)
+                for key in (
+                    "allow_cabin_overheat_protection",
+                    "supports_fan_only_cabin_overheat_protection",
+                    "cabin_overheat_protection_actively_cooling",
+                    "cop_not_running_reason",
+                )
+            }
+        )
+        return attrs
 
     async def async_select_option(self, option: str) -> None:
         if option != "Off" and self.manager.climate_state.get("allow_cabin_overheat_protection") is False:

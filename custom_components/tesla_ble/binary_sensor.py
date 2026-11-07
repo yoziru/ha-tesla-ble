@@ -247,6 +247,7 @@ class TeslaBinarySensor(TeslaBLEEntity, BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        if self.entity_description.attrs_fn is None:
-            return None
-        return self.entity_description.attrs_fn(self.manager)
+        attrs = dict(super().extra_state_attributes or {})
+        if self.entity_description.attrs_fn is not None:
+            attrs.update(self.entity_description.attrs_fn(self.manager) or {})
+        return attrs or None

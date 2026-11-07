@@ -442,8 +442,9 @@ class TeslaBLEManager:
         if state == "vehicle_status":
             interval = self.vcsec_poll_interval
         elif state in INFOTAINMENT_STATES:
-            # Freshness is an observation contract, not the scheduler's promise.
-            # Idle backoff can intentionally leave awake telemetry unavailable.
+            # Freshness is an observation contract for decisions that need current
+            # data (poll cadence, diagnostics); availability keeps the last
+            # observation while vehicle status stays live.
             interval = self._poll_policy.awake_interval_ms / 1000
         else:
             interval = self._poll_policy.sleep_timeout_ms / 1000
@@ -452,11 +453,11 @@ class TeslaBLEManager:
     def state_available(self, state: str) -> bool:
         """Whether entities should expose this state.
 
-        The vehicle status is the reachability signal: while it is fresh the
-        car can be talked to (not proof of location). A sleeping vehicle stops sending
-        infotainment data by design, so its last known values stay visible;
-        once status itself is stale all telemetry expires. Advertisements
-        alone cannot confirm that the car is still asleep.
+        The vehicle status is the reachability signal: while it is fresh the car
+        can be talked to (not proof of location). Infotainment polls are slower
+        than the freshness window, so a reachable car keeps its last known values
+        between polls, whether it is awake or asleep. Once status itself is stale
+        all telemetry expires. Advertisements alone cannot confirm reachability.
         """
         if self._stopped or self._key_rejected:
             return False
@@ -465,9 +466,12 @@ class TeslaBLEManager:
             return status_fresh
         if not status_fresh:
             return False
-        if self.state_fresh(state):
-            return True
-        return bool(self.vehicle_status.get("asleep", False))
+        if state in INFOTAINMENT_STATES:
+            # Keep the last observation visible, but do not advertise a group
+            # that has never been read. A sleeping car may still show cached data.
+            return bool(self.vehicle_status.get("asleep", False)) or state in self.state_observed_at
+        # Firmware offers actions, so it still needs a current observation.
+        return self.state_fresh(state) or bool(self.vehicle_status.get("asleep", False))
 
     def _received_state(self, state: str) -> None:
         self._state_received_at[state] = time.monotonic()

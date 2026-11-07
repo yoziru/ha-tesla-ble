@@ -143,16 +143,22 @@ genuine activity, the idle policy eventually returns to the sleep-timeout cadenc
 even if VCSEC still reports `AWAKE`. Charging/sentry changes that occur while backed
 off are discovered on the next successful probe, not inferred from advertisements.
 
-Freshness is separate: idle backoff does not extend infotainment freshness.
-An awake, reachable car can therefore have unavailable old infotainment values.
-A freshly confirmed sleeping car can expose cached values, but that does not make
-them fresh. Downloaded diagnostics include each group's observation age,
-freshness/availability, effective cadence, idle/arrival state and poll outcomes.
-Poll completion and receipt of a new observation remain separate diagnostics.
+Freshness is separate: idle backoff does not extend the freshness used for
+polling decisions. Availability is anchored to vehicle status: while status is
+fresh, infotainment data groups keep their last observed readings between the
+slower polls, whether the car is awake or asleep, and expose `stale: true` once
+a reading is older than its freshness window. A group that has never been read
+stays unavailable while the car is awake; a sleeping car may still show cached
+data. Firmware status still requires a current observation unless the car is
+asleep. Once status is stale, live readings become unavailable even if Bluetooth
+adverts are still visible. Downloaded diagnostics include each group's
+observation age, freshness/availability, effective cadence, idle/arrival state
+and poll outcomes. Poll completion and receipt of a new observation remain
+separate diagnostics.
 
 | Vehicle state | Telemetry |
 | --- | --- |
-| Awake, answering status requests | Fresh readings; individual data groups expire if updates stop. |
+| Awake, answering status requests | Last observed readings stay visible between the slower infotainment polls. |
 | Asleep, still answering status requests | Last observed readings remain visible without waking the car. |
 | No recent status, whether last seen awake or asleep | Live readings become unavailable, even if Bluetooth adverts are still visible. |
 

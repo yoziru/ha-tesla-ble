@@ -129,11 +129,13 @@ Returning to range or reconnecting can request fresh data without waking the car
 advertisements and GATT connections are not proof of vehicle activity.
 **Connection** reports the Bluetooth link, not whether the key is authorized.
 
-After at least five minutes of observed absence, a return gets a fixed three-minute
-refresh window (at most six poll batches). Passive refreshes share an eleven-minute
-cooldown, persisted across reloads; link/proxy flapping cannot renew the window.
-A sleeping report ends it. Failed or partial requests do not extend it or trigger
-immediate retries. All automatic telemetry uses `NO_WAKE_SKIP`.
+After reconnect, a proven return, or an asleep-to-awake transition, fresh VCSEC
+awake status allows an immediate refresh and a fixed three-minute cadence window.
+These triggers share an eleven-minute cooldown, persisted across reloads;
+link/proxy flapping cannot renew it. Cached awake state is not sufficient.
+Sleep, disconnect or stale status cancels the window. Failed or partial requests
+do not extend it or trigger immediate retries. All automatic telemetry uses
+`NO_WAKE_SKIP`; a probe never resets idle timing.
 
 Live occupied-door opening, driving and successful user controls restart normal idle timing;
 phone/user presence alone does not.

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .manager import TeslaBLEManager
+from .manager import INFOTAINMENT_STATES, TeslaBLEManager
 
 
 def async_add_supported_entities(
@@ -57,3 +59,10 @@ class TeslaBLEEntity(Entity):
     @property
     def available(self) -> bool:
         return self.manager.state_available(self._state_key) if self._state_key else not self.manager._stopped
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Expose whether this group's last reading is older than its freshness window."""
+        if self._state_key not in INFOTAINMENT_STATES:
+            return None
+        return {"stale": not self.manager.state_fresh(self._state_key)}

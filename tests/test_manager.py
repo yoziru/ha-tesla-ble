@@ -644,20 +644,24 @@ async def test_sleep_and_reachability_availability(hass, sim, monkeypatch, hass_
     }
     for state in groups:
         manager._state_received_at[state] = time.monotonic() - 3600
+        manager.state_observed_at[state] = dt_util.utcnow()
     manager.vehicle_status = {**manager.vehicle_status, "asleep": asleep}
     manager.polling = polling
     manager._state_received_at["vehicle_status"] = time.monotonic() - (0 if status_fresh else 3600)
     manager.rssi = None
     manager._notify()
 
-    kept = asleep and status_fresh
+    kept = status_fresh
     assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == ("55" if kept else "unavailable")
     assert state_of(hass, "binary_sensor", f"{VIN}_binary_asleep") == (
         ("on" if asleep else "off") if status_fresh else "unavailable"
     )
     assert state_of(hass, "button", f"{VIN}_button_wake") == ("unknown" if status_fresh else "unavailable")
     for state, (domain, unique_id) in groups.items():
-        assert (state_of(hass, domain, unique_id) == "unavailable") is not kept, state
+        # Infotainment stays visible while status is live; firmware also needs a
+        # current observation, so it only falls back to cache while asleep.
+        kept_here = kept if state != "software_update_state" else asleep and kept
+        assert (state_of(hass, domain, unique_id) == "unavailable") is not kept_here, state
 
     # Local meters, the Bluetooth link, and presence are not car telemetry.
     for domain, unique_id in (
@@ -666,6 +670,40 @@ async def test_sleep_and_reachability_availability(hass, sim, monkeypatch, hass_
         ("device_tracker", f"{VIN}_tracker"),
     ):
         assert state_of(hass, domain, unique_id) != "unavailable"
+
+
+async def test_infotainment_reports_stale_and_hides_unobserved_groups(hass, sim, monkeypatch, hass_storage):
+    """Old readings stay visible with a stale marker; never-read groups stay unavailable."""
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage)
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: bool(manager.charge_state))
+    entity_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{VIN}_sensor_battery_level")
+
+    assert hass.states.get(entity_id).attributes["stale"] is False
+    manager._state_received_at["charge_state"] = time.monotonic() - 3600
+    manager._notify()
+    state = hass.states.get(entity_id)
+    assert state.state == "55"
+    assert state.attributes["raw_soc"] == 55
+    assert state.attributes["stale"] is True
+
+    manager._state_received_at.pop("charge_state")
+    manager.state_observed_at.pop("charge_state")
+    manager.vehicle_status = {**manager.vehicle_status, "asleep": False}
+    manager._notify()
+    assert state_of(hass, "sensor", f"{VIN}_sensor_battery_level") == "unavailable"
+
+
+async def test_read_only_window_sensor_keeps_window_attributes_and_stale_flag(hass, sim, monkeypatch, hass_storage):
+    """A read-only windows sensor keeps its grouped attributes plus the stale flag."""
+    entry, _ = await setup_entry(hass, sim, monkeypatch, hass_storage, role="VEHICLE_MONITOR")
+    manager = entry.runtime_data
+    await settle_until(hass, lambda: bool(manager.closures_state))
+    manager._on_closures_state({**manager.closures_state, "window_open_driver_front": False})
+    entity_id = er.async_get(hass).async_get_entity_id("binary_sensor", DOMAIN, f"{VIN}_binary_windows_open")
+    state = hass.states.get(entity_id)
+    assert state.attributes["Driver Front"] == "Closed"
+    assert state.attributes["stale"] is False
 
 
 async def test_cached_telemetry_survives_reload_without_restoring_reachability(hass, sim, monkeypatch, hass_storage):
@@ -872,6 +910,7 @@ async def test_fleet_style_entities_and_attributes(hass, sim, monkeypatch, hass_
     windows_id = er.async_get(hass).async_get_entity_id("cover", DOMAIN, f"{VIN}_cover_windows")
     windows = hass.states.get(windows_id)
     assert windows.state == "unknown"
+    assert windows.attributes["stale"] is False
     assert windows.attributes["Driver Rear"] == "Unknown"
     manager._on_closures_state({"window_open_driver_front": True})
     assert hass.states.get(windows_id).state == "open"
@@ -1173,7 +1212,8 @@ async def test_return_home_refreshes_without_waiting_or_waking(
         clock.value += 121
         manager._on_vehicle_status(dict(manager.vehicle_status, asleep=False))
         assert not manager.state_fresh("charge_state")
-        assert not manager.state_available("charge_state")
+        # A live status keeps the last observation visible between the slower polls.
+        assert manager.state_available("charge_state")
         manager._infotainment_poll_decision(manager_module.monotonic_ms())
         assert manager.polling_diagnostics["decision"]["effective_interval_seconds"] == 660
         manager._on_vehicle_status(dict(manager.vehicle_status, asleep=True))
@@ -1424,6 +1464,7 @@ async def test_optional_controls_detect_capabilities_and_follow_reported_state(h
     assert manager.climate_state["seat_fan_front_left"] == 0
     cop_id = registry.async_get_entity_id("select", DOMAIN, f"{VIN}_select_cabin_overheat_protection")
     assert hass.states.get(cop_id).attributes["options"] == ["Off", "On"]
+    assert hass.states.get(cop_id).attributes["stale"] is False
     await hass.services.async_call("select", "select_option", {"entity_id": cop_id, "option": "On"}, blocking=True)
     await settle_until(hass, lambda: hass.states.get(cop_id).state == "On")
     temp_id = registry.async_get_entity_id("select", DOMAIN, f"{VIN}_select_cop_activation_temperature")

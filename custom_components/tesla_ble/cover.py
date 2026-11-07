@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.cover import (
     CoverDeviceClass,
     CoverEntity,
@@ -105,8 +107,10 @@ class TeslaWindowsCover(TeslaBLEEntity, CoverEntity):
         super().__init__(manager, "cover_windows", "closures_state")
 
     @property
-    def extra_state_attributes(self) -> dict[str, str] | None:
-        return _window_attributes(self.manager)
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attrs = dict(super().extra_state_attributes or {})
+        attrs.update(_window_attributes(self.manager) or {})
+        return attrs or None
 
     @property
     def is_closed(self) -> bool | None:

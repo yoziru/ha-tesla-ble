@@ -1246,7 +1246,7 @@ dev = [
     { name = "pytest-homeassistant-custom-component", specifier = "==0.13.375" },
     { name = "ruff", specifier = ">=0.14" },
     { name = "serialx", specifier = "==1.15.1" },
-    { name = "tesla-ble", specifier = "==6.3.0" },
+    { name = "tesla-ble", specifier = "==6.4.0" },
 ]
 
 [[package]]
@@ -3132,22 +3132,22 @@ wheels = [
 
 [[package]]
 name = "tesla-ble"
-version = "6.3.0"
+version = "6.4.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b3/4d/22a95168c40c6dbdd4953cfd7e6d72d901b1319138bb8e6c79ae24b6a3fb/tesla_ble-6.3.0.tar.gz", hash = "sha256:fe05fe630e8d15034989fe87f634c080007a57da1af522cbd80566efcb14cbe8", size = 309501, upload-time = "2026-10-19T22:41:44.819Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/e7/832891452e033e64ef5b13bd571bed522e796f4d829426e597ec6b779892/tesla_ble-6.4.0.tar.gz", hash = "sha256:e1e1bd06fb9d9ed368a589e21cb540b0ec3be4b6de01b16be08e649bef8d2af5", size = 311311, upload-time = "2026-11-07T11:58:21.39Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/89/25/a1cc6f4727c97783c5971164b223faf249219aba8911436a48d6da8aa2c1/tesla_ble-6.3.0-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:63d76a600bf01dd864e4887703fe2a38b08ddc511c4bcea0c626099e873937b0", size = 591286, upload-time = "2026-10-19T22:41:24.221Z" },
-    { url = "https://files.pythonhosted.org/packages/e6/db/325bfd97ea7072178ee18eb565bca035c63db6bd87bdd3eac510cc9b9550/tesla_ble-6.3.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:905a1abe60578fb7277ed5ad71fd4ed8838b40b9d66cbb342576eed71c889dd8", size = 553983, upload-time = "2026-10-19T22:41:25.745Z" },
-    { url = "https://files.pythonhosted.org/packages/92/cb/10a5c96b15579f5fc8419698b40ef43764242db15ad1e565c242c827becf/tesla_ble-6.3.0-cp314-cp314-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5c20f57fc862c3c789196fe73d5fd1b5affbf4a86841fd56daf151e1ca9d41a8", size = 611703, upload-time = "2026-10-19T22:41:27.352Z" },
-    { url = "https://files.pythonhosted.org/packages/9f/ac/cd7cdd961a31f6e2192350524670c7498bd33905039f07d6390d5928d470/tesla_ble-6.3.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:cd6d9d67ee1ba97545c60664ee1cd9c9fbe4b56e557fa5bbdcdc3abe4166fc82", size = 651526, upload-time = "2026-10-19T22:41:29.366Z" },
-    { url = "https://files.pythonhosted.org/packages/d6/6d/552e011fa0eb705713ddad354375967a17f7558c967ad88326cd5464c483/tesla_ble-6.3.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:fc23392ff65ee21c3a380acc2ca45a635af118bcda1d012280f48b7ac040a0b2", size = 1619877, upload-time = "2026-10-19T22:41:31.234Z" },
-    { url = "https://files.pythonhosted.org/packages/cf/d6/724421f7fa368cd0d63bb6c14f9a806f09abeec5f214d293cadb026e3e1c/tesla_ble-6.3.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:b633e27c18f19a6d782a2328028792b7a6c5adfed0fa226e2a8bd6596be83af0", size = 1700829, upload-time = "2026-10-19T22:41:33.242Z" },
-    { url = "https://files.pythonhosted.org/packages/71/a8/32ec13bb4b1ee1f7f682d51254f7d57be1a86782e6ec9186f9d6c48ccf76/tesla_ble-6.3.0-cp315-cp315-macosx_10_15_x86_64.whl", hash = "sha256:032b771b2dda581617d064dd4d8e89bf906b6e9886990dd5972656b8eb11d24a", size = 591295, upload-time = "2026-10-19T22:41:34.769Z" },
-    { url = "https://files.pythonhosted.org/packages/4c/de/3c32f3f1c258918c68dc71ee85fc20e7e07c5f4b16ba77586704c288d01a/tesla_ble-6.3.0-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:707fe19cfcdb9c8dab781114bb37251dc50b357a7ccd21528223ed1006fba658", size = 553998, upload-time = "2026-10-19T22:41:36.279Z" },
-    { url = "https://files.pythonhosted.org/packages/a8/bc/4b3d11ebbad0ac64c61b229b58bce514323acd48f274c29da1b05040d799/tesla_ble-6.3.0-cp315-cp315-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5788b4c0a2864a24cf283bb3e0053057aeddd596abd871945fbd5e0f9581ddb2", size = 611703, upload-time = "2026-10-19T22:41:38.025Z" },
-    { url = "https://files.pythonhosted.org/packages/65/5b/f1119e23489b614e92253240af15afb9cbd0b3d288751e6131df0eda424b/tesla_ble-6.3.0-cp315-cp315-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d2e91250c92acad16eb49b1061b59d40eddaebb540c31ca919f6d9c75b2bf4e4", size = 651523, upload-time = "2026-10-19T22:41:39.687Z" },
-    { url = "https://files.pythonhosted.org/packages/67/ff/33df057da702aa2444c5d4943b8a1a8c5eb2a4708c163e3e96dc1e9d8298/tesla_ble-6.3.0-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:c4442da83b5315e36a0787f3781ac39d7d14b0342b256594d42909693b0fd48f", size = 1619886, upload-time = "2026-10-19T22:41:41.327Z" },
-    { url = "https://files.pythonhosted.org/packages/3a/12/1e54f21e0e7ec82ca99b12f2223dc66d6ebb7633816a7f9010b6fa962d61/tesla_ble-6.3.0-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:a14535720360cfa3136aca54bf6ccb32ef4c0b3732d273461cc72d0cde10d66d", size = 1700836, upload-time = "2026-10-19T22:41:43.077Z" },
+    { url = "https://files.pythonhosted.org/packages/52/84/24a1eba57ecf29fc7f76928da36103d57e18f916a9cc5a605f6f8c59d377/tesla_ble-6.4.0-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:4eaab22ef3414d56ff157c60432bc24197f4962bbec50c33046338de8de1c027", size = 592754, upload-time = "2026-11-07T11:58:00.909Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/a9/068c4e791d2fd4a1e59ac0f451567ab42ec4360183dcd9fd48371f76aabb/tesla_ble-6.4.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:3e8128169601457048e159656154d4b1e8c7bb13c0e817e61eabd3c2f8c564b7", size = 555599, upload-time = "2026-11-07T11:58:02.699Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/e7/b042124b1b6d53a64435c0a0fcdfdad21a356ae478391b9e10999c232b99/tesla_ble-6.4.0-cp314-cp314-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:be689ef4fc07897641fa6f9a1f7c176ccd8bc9a90977b54bd50f8fa671658b4a", size = 612611, upload-time = "2026-11-07T11:58:04.46Z" },
+    { url = "https://files.pythonhosted.org/packages/39/a7/62627ae14bc533b8de60b7746ec75c752ee098886982a9f0e6e7d5566d98/tesla_ble-6.4.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b657e3bf69a7cd446d091102097e3ab70b57c9322ba61855c11be56825dd9c2c", size = 652945, upload-time = "2026-11-07T11:58:05.967Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/17/bd488eae3e64bb5996d4a2503d25ba5bcaf9b1780bc0ed8be184493fb10e/tesla_ble-6.4.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:cd8517440b0e431556f702e053d1bc33ba8044a24fedf7caf7e42d98bbaccdcc", size = 1621407, upload-time = "2026-11-07T11:58:07.531Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/54/b803e33ece58996585840485059880d12fd7886db5402e065a95404ca305/tesla_ble-6.4.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:d047722f45dc7e6026d873c371e805d1ef2085be994ed6fb23b93e5d8b20ec0b", size = 1702336, upload-time = "2026-11-07T11:58:09.273Z" },
+    { url = "https://files.pythonhosted.org/packages/02/b7/113d2d4cac811a3d94bab18396e7c7964928f2d5200d7c966bc6533871f0/tesla_ble-6.4.0-cp315-cp315-macosx_10_15_x86_64.whl", hash = "sha256:0d73dfb1cae9d2edac8fd19953f218bcfb2d57aa1f2ce80ce79eaa8c98c3f184", size = 592762, upload-time = "2026-11-07T11:58:10.977Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/22/b0d3eedd5570ea083aefc20ac1b0591c7e8b822c05bf706d2089b0a28c69/tesla_ble-6.4.0-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:691235485bed34c2f200e60e247d0cb38b701ce3bcb71434dd274c23afc4ef58", size = 555606, upload-time = "2026-11-07T11:58:12.697Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/e5/a8a46a5851ff789186b2f6935178b0a4d0b6913dd75738e241d5299b7dce/tesla_ble-6.4.0-cp315-cp315-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f64d029e22c4ffa199ab931d043da14695e66343d1e36f6ca40aefd3b1eb0a55", size = 612613, upload-time = "2026-11-07T11:58:14.428Z" },
+    { url = "https://files.pythonhosted.org/packages/04/10/72f973f68a5b4101baea0c6f52b3b1c612c2f09b44769e951613ecf6496e/tesla_ble-6.4.0-cp315-cp315-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:305420f460d18f611a49d963fcaa5e45c9781ba98f68de8bd60a12bcb98bf127", size = 652944, upload-time = "2026-11-07T11:58:16.217Z" },
+    { url = "https://files.pythonhosted.org/packages/79/a5/06af9b6ef5fb22215c52c9e1c98a73863edde70e70a1dc06525c8bdb3921/tesla_ble-6.4.0-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:7f3d15d0de33b9d45a36d62950aed0a2ab91f5ce569ff5d895154203132eb21a", size = 1621413, upload-time = "2026-11-07T11:58:17.921Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/e8/56401da15763d4c4d1e7210462c9557e6f916d37f11b70f97f57382d4c1e/tesla_ble-6.4.0-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:cc1b2d5919e037f02a70ebfe670b2d40f582c860c0cd75305af429d0f0ddc7f9", size = 1702340, upload-time = "2026-11-07T11:58:19.887Z" },
 ]
 
 [[package]]

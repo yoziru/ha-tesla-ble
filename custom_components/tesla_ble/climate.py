@@ -62,6 +62,10 @@ class TeslaClimate(TeslaBLEEntity, ClimateEntity):
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE | ClimateEntityFeature.PRESET_MODE | ClimateEntityFeature.FAN_MODE
     )
+    # Home Assistant 2026.11 renamed the temperature members to native_*. A class
+    # that provides both is served from the native ones without a deprecation
+    # warning; the plain names keep 2026.3-2026.10 working.
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_target_temperature_step = 0.5
 
@@ -80,12 +84,20 @@ class TeslaClimate(TeslaBLEEntity, ClimateEntity):
         return HVACMode.HEAT_COOL if is_on else HVACMode.OFF
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         return self._state.get("inside_temp_celsius")
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         return self._state.get("driver_temp_setting")
+
+    @property
+    def current_temperature(self) -> float | None:  # Home Assistant < 2026.11
+        return self.native_current_temperature
+
+    @property
+    def target_temperature(self) -> float | None:  # Home Assistant < 2026.11
+        return self.native_target_temperature
 
     @property
     def min_temp(self) -> float:
